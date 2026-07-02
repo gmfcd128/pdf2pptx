@@ -1,0 +1,3 @@
+透過OCR機制搭配AI來將PDF格式的簡報轉換，抽出其中的文字來得到可以編輯的PowerPoint簡報檔
+使用本地AI，基於主流 RTX 5050 8GB上測試，有不錯的處理速度
+適用於Notebook LM等AI工具生成的PDF簡報檔案
