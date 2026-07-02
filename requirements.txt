@@ -1,0 +1,19 @@
+# torch/torchvision are intentionally NOT listed here -- install them separately
+# with the CUDA build matching your platform, e.g.:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# (the Dockerfile's base image already bundles a matching torch/CUDA/cuDNN, so this
+# step is skipped there).
+
+pymupdf
+opencv-python-headless
+numpy
+pillow
+simple-lama-inpainting
+paddleocr
+transformers
+python-pptx
+
+# service layer
+fastapi
+uvicorn[standard]
+python-multipart

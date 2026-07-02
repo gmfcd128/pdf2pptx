@@ -1,0 +1,84 @@
+# Brings up all three pieces of the pdf2pptx web UI together:
+#   pdf2pptx-service  - existing Python/FastAPI GPU conversion service (root Dockerfile)
+#   pdf2pptx-backend  - ASP.NET Core API proxying to it (web/backend)
+#   pdf2pptx-frontend - Vue SPA served by nginx, which also reverse-proxies /api (web/frontend)
+#
+# Usage: docker compose up --build
+#   Frontend:      http://localhost:5173
+#   Backend API:   http://localhost:5080/api
+#   Python service http://localhost:8000 (not meant to be hit directly by the
+#                  browser -- exposed mainly for debugging/health checks)
+#
+# First run will be slow and needs disk space: the pdf2pptx-service image ends
+# up ~22GB (CUDA 12.8 toolkit + PyTorch + PaddleOCR/paddlex, pulled and
+# installed during build -- see DEPLOYMENT.md for why), plus the Python service
+# downloads ~200MB+ of OCR/inpainting model checkpoints on its first request.
+# Checkpoints and job files persist in the pdf2pptx_data volume across restarts
+# (`docker compose down` without `-v`), so this cost is paid once per machine.
+
+services:
+  pdf2pptx-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdf2pptx-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - pdf2pptx_data:/data
+    environment:
+      PDF2PPTX_OCR_LANG: chinese_cht
+    networks:
+      - pdf2pptx-net
+    # Requires Docker Desktop's WSL2 GPU passthrough to be set up. Remove this
+    # `deploy` block entirely if you don't have that configured -- the pipeline
+    # already falls back to CPU/classical inpainting automatically when no GPU
+    # is visible (see CLAUDE.md), it'll just run slower.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  pdf2pptx-backend:
+    build:
+      context: ./web/backend/Pdf2Pptx.Api
+      dockerfile: Dockerfile
+    container_name: pdf2pptx-backend
+    ports:
+      - "5080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      PythonService__BaseUrl: http://pdf2pptx-service:8000
+    depends_on:
+      pdf2pptx-service:
+        condition: service_healthy
+    networks:
+      - pdf2pptx-net
+
+  pdf2pptx-frontend:
+    build:
+      context: ./web/frontend
+      dockerfile: Dockerfile
+    container_name: pdf2pptx-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - pdf2pptx-backend
+    networks:
+      - pdf2pptx-net
+
+networks:
+  pdf2pptx-net:
+    driver: bridge
+
+volumes:
+  pdf2pptx_data:
