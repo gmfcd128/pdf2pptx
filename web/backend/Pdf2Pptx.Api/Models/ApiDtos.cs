@@ -22,8 +22,9 @@ public sealed record ErrorResponse(string Error);
 /// OriginalImage are full URLs rooted at this API (rewritten from Python's
 /// job-relative paths, same trick SubmitConversion applies to status_url),
 /// BackgroundImage carrying a `?v=` cache-busting query so the browser refetches
-/// it after a manual inpaint/revert swaps the underlying file. Elements is
-/// forwarded verbatim -- already PPTist PPTTextElement-shaped JSON from Python.</summary>
+/// it after a manual inpaint/restore-region swaps the underlying file. Elements
+/// is forwarded verbatim -- already PPTist PPTTextElement-shaped JSON from
+/// Python.</summary>
 public sealed record SlideDto(
     string Id,
     int PageIndex,
@@ -35,6 +36,10 @@ public sealed record SlideDto(
 
 public sealed record SlidesResponse(double ViewportRatio, List<SlideDto> Slides);
 
-public sealed record InpaintRequest(List<List<double>> Points, string Source);
+/// <summary>Shared body shape for both the inpaint and restore-region actions
+/// -- each always operates on a fixed, distinct source (current background for
+/// inpaint, the original render for restore-region), so there is no source
+/// field to choose here, just the selected region.</summary>
+public sealed record InpaintRequest(List<List<double>> Points);
 
 public sealed record BackgroundImageResponse(string BackgroundImage);

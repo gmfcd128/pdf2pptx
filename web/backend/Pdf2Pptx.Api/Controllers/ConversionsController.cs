@@ -84,7 +84,7 @@ public sealed class ConversionsController(IPdfConversionClient conversionClient)
     /// are rewritten to route back through this API (never exposing the Python
     /// container's own address to the browser) and carry a `?v=` cache-busting
     /// query derived from the background file's current version, so the browser
-    /// re-fetches it after a manual inpaint/revert.</summary>
+    /// re-fetches it after a manual inpaint/restore-region.</summary>
     [HttpGet("{jobId}/slides")]
     public async Task<IActionResult> GetSlides(string jobId, CancellationToken ct)
     {
@@ -109,24 +109,26 @@ public sealed class ConversionsController(IPdfConversionClient conversionClient)
     public Task<IActionResult> GetPageOriginal(string jobId, int pageIndex, CancellationToken ct) =>
         StreamPageImageAsync(jobId, pageIndex, "original", ct);
 
-    /// <summary>Re-inpaints a user-drawn quadrilateral on one page, from either
-    /// the original un-inpainted render or the current background, and replaces
-    /// that page's background with the result.</summary>
+    /// <summary>Re-inpaints a user-drawn quadrilateral on one page, always
+    /// sourced from the current background, and replaces that page's
+    /// background with the result.</summary>
     [HttpPost("{jobId}/pages/{pageIndex}/inpaint")]
     public async Task<IActionResult> InpaintPageRegion(
         string jobId, int pageIndex, [FromBody] InpaintRequest request, CancellationToken ct)
     {
-        var result = await conversionClient.InpaintPageRegionAsync(jobId, pageIndex, request.Points, request.Source, ct);
+        var result = await conversionClient.InpaintPageRegionAsync(jobId, pageIndex, request.Points, ct);
         return Ok(new BackgroundImageResponse(
             $"/api/conversions/{jobId}/pages/{pageIndex}/background.png?v={result.BackgroundVersion}"));
     }
 
-    /// <summary>Discards any auto/manual inpainting on this page and restores its
-    /// background to the original, un-inpainted page render.</summary>
-    [HttpPost("{jobId}/pages/{pageIndex}/revert")]
-    public async Task<IActionResult> RevertPageBackground(string jobId, int pageIndex, CancellationToken ct)
+    /// <summary>Copies the original, un-inpainted page render's pixels into a
+    /// user-drawn quadrilateral on the current background -- undoes
+    /// auto/manual inpainting in just that region, not the whole page.</summary>
+    [HttpPost("{jobId}/pages/{pageIndex}/restore-region")]
+    public async Task<IActionResult> RestorePageRegion(
+        string jobId, int pageIndex, [FromBody] InpaintRequest request, CancellationToken ct)
     {
-        var result = await conversionClient.RevertPageBackgroundAsync(jobId, pageIndex, ct);
+        var result = await conversionClient.RestorePageRegionAsync(jobId, pageIndex, request.Points, ct);
         return Ok(new BackgroundImageResponse(
             $"/api/conversions/{jobId}/pages/{pageIndex}/background.png?v={result.BackgroundVersion}"));
     }

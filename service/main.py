@@ -20,15 +20,17 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import cv2
+import numpy as np
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from pdf2pptx import PdfToPptxConverter, PipelineConfig
+from pdf2pptx.inpainting import polygon_mask
 
 from .jobs import JobStatus, JobStore
 from .pptist import build_slide_json
@@ -63,10 +65,11 @@ async def _worker_loop():
             def page_asset_cb(page_idx, img_rgb, clean_bg_rgb, all_texts, W, H, _job=job):
                 # Persists the raw render, the auto-inpainted background, and the
                 # reconciled text blocks (as PPTist-ready slide JSON) per page --
-                # this is what GET /jobs/{id}/slides and the manual inpaint/revert
-                # endpoints below read from and write back to. Runs on this same
-                # executor thread as the rest of the conversion (only one job
-                # processes at a time), so plain synchronous file IO is fine here.
+                # this is what GET /jobs/{id}/slides and the manual inpaint/
+                # restore-region endpoints below read from and write back to.
+                # Runs on this same executor thread as the rest of the
+                # conversion (only one job processes at a time), so plain
+                # synchronous file IO is fine here.
                 page_dir = _job.input_path.parent / "pages" / str(page_idx)
                 page_dir.mkdir(parents=True, exist_ok=True)
                 cv2.imwrite(str(page_dir / "original.png"), cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
@@ -101,9 +104,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="pdf2pptx", lifespan=lifespan)
 
 
-class InpaintRequest(BaseModel):
+class RegionRequest(BaseModel):
     points: List[Tuple[float, float]]
-    source: Literal["original", "current"] = "current"
 
 
 def _require_page_dir(job_id: str, page_index: int) -> Path:
@@ -229,17 +231,21 @@ async def get_page_original(job_id: str, page_index: int):
 
 
 @app.post("/jobs/{job_id}/pages/{page_index}/inpaint")
-async def inpaint_page_region(job_id: str, page_index: int, body: InpaintRequest):
+async def inpaint_page_region(job_id: str, page_index: int, body: RegionRequest):
+    """Re-inpaints a user-drawn quadrilateral, always sourced from the page's
+    current background (whatever the last auto-inpaint or manual edit left
+    there) -- restoring original pixels instead is a separate, distinct
+    action (see restore_page_region below), not a source choice on this one.
+    """
     if len(body.points) != 4:
         raise HTTPException(status_code=400, detail="points must contain exactly 4 [x, y] pairs")
 
     page_dir = _require_page_dir(job_id, page_index)
-    source_name = "original.png" if body.source == "original" else "background.png"
-    source_path = page_dir / source_name
-    if not source_path.exists():
-        raise HTTPException(status_code=404, detail=f"No {source_name} for job {job_id} page {page_index}")
+    bg_path = page_dir / "background.png"
+    if not bg_path.exists():
+        raise HTTPException(status_code=404, detail=f"No background.png for job {job_id} page {page_index}")
 
-    img_bgr = cv2.imread(str(source_path))
+    img_bgr = cv2.imread(str(bg_path))
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     H, W = img_rgb.shape[:2]
 
@@ -251,7 +257,6 @@ async def inpaint_page_region(job_id: str, page_index: int, body: InpaintRequest
         executor, converter.inpainter.clean_polygon, img_rgb, body.points, W, H, converter.config
     )
 
-    bg_path = page_dir / "background.png"
     cv2.imwrite(str(bg_path), cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR))
     return {
         "background_path": f"pages/{page_index}/background.png",
@@ -259,15 +264,32 @@ async def inpaint_page_region(job_id: str, page_index: int, body: InpaintRequest
     }
 
 
-@app.post("/jobs/{job_id}/pages/{page_index}/revert")
-async def revert_page_background(job_id: str, page_index: int):
+@app.post("/jobs/{job_id}/pages/{page_index}/restore-region")
+async def restore_page_region(job_id: str, page_index: int, body: RegionRequest):
+    """Copies the original (pre-inpaint) page render's pixels into a
+    user-drawn quadrilateral on the current background -- a plain pixel
+    composite, no LaMa involved, for undoing auto/manual inpainting in just
+    that region rather than the whole page.
+    """
+    if len(body.points) != 4:
+        raise HTTPException(status_code=400, detail="points must contain exactly 4 [x, y] pairs")
+
     page_dir = _require_page_dir(job_id, page_index)
     original_path = page_dir / "original.png"
+    bg_path = page_dir / "background.png"
     if not original_path.exists():
         raise HTTPException(status_code=404, detail=f"No original render for job {job_id} page {page_index}")
+    if not bg_path.exists():
+        raise HTTPException(status_code=404, detail=f"No background.png for job {job_id} page {page_index}")
 
-    bg_path = page_dir / "background.png"
-    shutil.copyfile(original_path, bg_path)
+    original = cv2.imread(str(original_path))
+    current = cv2.imread(str(bg_path))
+    H, W = original.shape[:2]
+
+    mask_3ch = cv2.cvtColor(polygon_mask(body.points, W, H), cv2.COLOR_GRAY2BGR)
+    result = np.where(mask_3ch > 0, original, current)
+
+    cv2.imwrite(str(bg_path), result)
     return {
         "background_path": f"pages/{page_index}/background.png",
         "background_version": int(bg_path.stat().st_mtime * 1000),

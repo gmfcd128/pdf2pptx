@@ -90,6 +90,13 @@ class OcrEngine:
     """
 
     def __init__(self, lang="chinese_cht"):
+        # use_doc_orientation_classify/use_doc_unwarping/use_textline_orientation
+        # must be disabled here, at construction, not just per predict() call --
+        # PaddleOCR decides whether to even build/load those three submodels
+        # (doc-orientation classifier, UVDoc unwarping, textline-orientation) at
+        # construction time based on these flags (default None lets its own
+        # pipeline default enable them); passing False only to predict() is too
+        # late; the models are already downloaded/loaded by then, just unused.
         self._ocr = PaddleOCR(
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
@@ -99,27 +106,57 @@ class OcrEngine:
         )
 
     def extract(self, img_rgb, W, H, config):
-        result = self._ocr.predict(img_rgb)[0]
+        """Returns (results, mask_boxes):
+
+        - results: reconciliation/editable-text candidates -- one dict per
+          detection that passed our own confidence/garbage filtering (see
+          config.ocr_min_conf, text_utils.looks_like_garbage), same shape as
+          before.
+        - mask_boxes: every detection's px_bbox, unfiltered -- the erasure
+          mask is built solely from this (see pipeline.py), on the premise
+          that text-shaped ink still needs erasing even when it's too
+          low-confidence or garbled to trust as a real transcription; only
+          the *editable-text* decision benefits from filtering that out.
+
+        The detection/recognition settings below are PP-OCRv6's own
+        documented defaults, pinned explicitly here (rather than left as
+        whatever this PaddleOCR version's implicit defaults happen to be),
+        plus text_rec_score_thresh=0 so the model does no confidence-based
+        filtering of its own -- our own config.ocr_min_conf below is the only
+        gate on what becomes editable text, and mask_boxes sees everything.
+        """
+        result = self._ocr.predict(
+            img_rgb,
+            text_det_limit_type="min",
+            text_det_limit_side_len=64,
+            text_det_thresh=0.3,
+            text_det_box_thresh=0.6,
+            text_det_unclip_ratio=1.5,
+            text_rec_score_thresh=0,
+        )[0]
         texts = result.get("rec_texts", [])
         scores = result.get("rec_scores", [])
         boxes = result.get("rec_boxes", [])
         polys = result.get("rec_polys", [None] * len(texts))
 
         results = []
+        mask_boxes = []
         for text, conf, box, poly in zip(texts, scores, boxes, polys):
+            bbox = tuple(float(v) for v in box)
+            mask_boxes.append(bbox)
+
             text = text.strip()
             if not text or conf < config.ocr_min_conf or looks_like_garbage(text, config.junk_chars):
                 continue
-            x0, y0, x1, y1 = (float(v) for v in box)
-            bbox = (x0, y0, x1, y1)
+            x0, y0, x1, y1 = bbox
             h_px = y1 - y0
 
             # render_geom/rotation_deg describe the text's own tilted quad, used
             # by slide_builder to size/rotate the PPTX text box to match it
             # instead of filling the (larger, always axis-aligned) px_bbox --
             # px_bbox itself is left as the axis-aligned box regardless, since
-            # that's what masking/reconciliation need (a rectangle guaranteed
-            # to fully contain the tilted text for erasure purposes).
+            # that's what reconciliation needs (a rectangle guaranteed to fully
+            # contain the tilted text).
             rotation_deg = 0.0
             render_geom = None
             if poly is not None:
@@ -137,4 +174,4 @@ class OcrEngine:
                 "font_size_pt": max(6.0, h_px * (config.slide_h_in / H) * 72 * 0.8),
                 "font_name": resolve_font(None, text),
             })
-        return results
+        return results, mask_boxes

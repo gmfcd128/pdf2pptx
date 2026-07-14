@@ -124,6 +124,19 @@ def _restore_line(result, orig, mask, x1, y1, x2, y2, radius, margin):
                 result[yy, x_lo:x_hi + 1, c] = np.round(filled).astype(np.uint8)
 
 
+def polygon_mask(polygon, W, H):
+    """Build a filled binary mask (0/255) for an arbitrary polygon region, in
+    the same (H, W) pixel space as `Inpainter.clean`/`clean_polygon`. Shared by
+    LaMa-based inpainting (`clean_polygon`) and the plain restore-original-
+    pixels compositing the web service's restore-region endpoint does
+    (service/main.py) -- neither needs its own mask-construction logic.
+    """
+    mask = np.zeros((H, W), dtype=np.uint8)
+    pts = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
+    cv2.fillPoly(mask, [pts], 255)
+    return mask
+
+
 class Inpainter:
     """Thin wrapper around a SimpleLama instance.
 
@@ -139,24 +152,16 @@ class Inpainter:
         return self._lama.device
 
     def clean(self, img_rgb, text_blocks, W, H, config, extra_boxes=None):
-        # Mask padding around each box before inpainting. Padding scales with box
-        # *height* only, on both axes -- not with box width, since the actual
-        # antialiasing/box-imprecision margin needed is determined by font size
-        # (the line's height), not by how many characters happen to be on the line.
-        # A margin too large also risks bleeding into a real color boundary right
-        # next to a text line (e.g. a colored table-header row).
+        # No padding around each box: text_blocks' px_bbox comes solely from
+        # the OCR model now (see pipeline.py), whose own detection already
+        # includes a margin around the tight text mask (text_det_unclip_ratio),
+        # so an extra pad here would just double up on that.
         mask = np.zeros((H, W), dtype=np.uint8)
         for t in text_blocks:
-            x0, y0, x1, y1 = t["px_bbox"]
-            h = y1 - y0
-            pad = max(config.mask_min_pad, h * config.mask_pad_frac)
-            x0, y0 = max(0, int(x0 - pad)), max(0, int(y0 - pad))
-            x1, y1 = min(W, int(x1 + pad)), min(H, int(y1 + pad))
+            x0, y0, x1, y1 = (int(v) for v in t["px_bbox"])
             cv2.rectangle(mask, (x0, y0), (x1, y1), 255, -1)
-        # extra_boxes (e.g. a fixed watermark region) erase unconditionally, on top
-        # of whatever text_blocks contributed -- these aren't text, so they don't
-        # go through the same per-box height-scaled padding; a flat pad is enough
-        # to clear antialiased edges.
+        # extra_boxes (e.g. a fixed watermark region) aren't text-detector
+        # output, so they still get a flat pad to clear antialiased edges.
         for x0, y0, x1, y1 in extra_boxes or []:
             pad = config.mask_min_pad
             x0, y0 = max(0, int(x0 - pad)), max(0, int(y0 - pad))
@@ -171,13 +176,11 @@ class Inpainter:
     def clean_polygon(self, img_rgb, polygon, W, H, config):
         """Inpaint an arbitrary user-drawn polygon region (e.g. a manually
         click-selected quadrilateral in the web editor), rather than the
-        padded text-line rectangles `clean` builds its mask from. Shares the
-        same LaMa/grid-line-protection path as `clean` -- only the mask
-        construction differs.
+        rectangles `clean` builds its mask from. Shares the same LaMa/
+        grid-line-protection path as `clean` -- only the mask construction
+        differs.
         """
-        mask = np.zeros((H, W), dtype=np.uint8)
-        pts = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
-        cv2.fillPoly(mask, [pts], 255)
+        mask = polygon_mask(polygon, W, H)
         if not mask.any():
             return img_rgb
 

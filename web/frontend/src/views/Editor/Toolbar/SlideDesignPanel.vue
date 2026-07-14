@@ -61,31 +61,19 @@
       <div class="row">
         <Button
           style="flex: 1;"
-          :disabled="manualInpaint.submitting || manualInpaint.active"
-          @click="manualInpaint.revertToOriginal()"
-        >
-          還原為原始頁面圖片
-        </Button>
-      </div>
-      <div class="row">
-        <div style="flex: 2;">修補來源：</div>
-        <Select
-          style="flex: 3;"
-          :value="manualInpaint.source"
           :disabled="manualInpaint.active"
-          @change="value => manualInpaint.setSource(value)"
+          @click="manualInpaint.start('restore')"
         >
-          <SelectOption value="current">目前背景</SelectOption>
-          <SelectOption value="original">原始頁面圖片</SelectOption>
-        </Select>
+          使用原始頁面圖片（框選 4 點）
+        </Button>
       </div>
       <div class="row">
         <Button
           style="flex: 1;"
           :disabled="manualInpaint.active"
-          @click="manualInpaint.start(manualInpaint.source)"
+          @click="manualInpaint.start('inpaint')"
         >
-          手動去背景文字（框選 4 點）
+          選擇性去背景文字（框選 4 點）
         </Button>
       </div>
       <p v-if="manualInpaint.error" class="pdf2pptx-error">{{ manualInpaint.error }}</p>

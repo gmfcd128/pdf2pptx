@@ -28,7 +28,7 @@ class PipelineConfig:
 
     lama_max_dim: int = 2200  # cap LaMa's working resolution to bound VRAM use
 
-    ocr_min_conf: float = 0.8
+    ocr_min_conf: float = 0.7
     ocr_lang: str = "chinese_cht"
 
     # Below this, a detected text line's own quadrilateral (see ocr.quad_geometry)
@@ -42,9 +42,12 @@ class PipelineConfig:
 
     junk_chars: frozenset = field(default_factory=lambda: frozenset("=|#*^~`\\{}<>[]_"))
 
-    # Mask padding around each accepted text box before inpainting.
+    # Flat padding for extra_boxes (e.g. a fixed watermark region) before
+    # inpainting -- these aren't text-detector output, unlike the OCR boxes
+    # driving the main erasure mask, which already carry their own margin
+    # (text_det_unclip_ratio) and get no additional padding (see
+    # inpainting.Inpainter.clean).
     mask_min_pad: int = 8
-    mask_pad_frac: float = 0.08
 
     # Straight background edges (table gridlines, but also small icon/card outlines)
     # get their exact original color redrawn back on top after erasure, even across

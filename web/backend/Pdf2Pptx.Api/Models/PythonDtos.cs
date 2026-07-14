@@ -74,7 +74,8 @@ public sealed class PythonSlidesResponse
     public required List<PythonSlideDto> Slides { get; init; }
 }
 
-/// <summary>Response shape shared by Python's inpaint and revert endpoints.</summary>
+/// <summary>Response shape shared by Python's inpaint and restore-region
+/// endpoints.</summary>
 public sealed class PythonBackgroundResponse
 {
     [JsonPropertyName("background_path")]
@@ -84,14 +85,12 @@ public sealed class PythonBackgroundResponse
     public required long BackgroundVersion { get; init; }
 }
 
-/// <summary>Outgoing-only shape for POST .../inpaint -- explicit property names
-/// regardless of any ambient serializer naming policy, matching Python's
-/// InpaintRequest pydantic model (service/main.py) field-for-field.</summary>
-public sealed class PythonInpaintRequest
+/// <summary>Outgoing-only shape for POST .../inpaint and .../restore-region --
+/// explicit property names regardless of any ambient serializer naming
+/// policy, matching Python's RegionRequest pydantic model (service/main.py)
+/// field-for-field.</summary>
+public sealed class PythonRegionRequest
 {
     [JsonPropertyName("points")]
     public required List<List<double>> Points { get; init; }
-
-    [JsonPropertyName("source")]
-    public required string Source { get; init; }
 }

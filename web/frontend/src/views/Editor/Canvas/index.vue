@@ -79,7 +79,7 @@
 
     <div class="quad-inpaint-toolbar" v-if="manualInpaint.active">
       <span v-if="manualInpaint.points.length < 4" class="hint">
-        點擊畫布上 4 個點以框選要重新去背景文字的區域（{{ manualInpaint.points.length }}/4，右鍵可移除上一點）
+        點擊畫布上 4 個點以框選{{ manualInpaint.mode === 'restore' ? '要還原為原始圖片' : '要重新去背景文字' }}的區域（{{ manualInpaint.points.length }}/4，右鍵可移除上一點）
       </span>
       <template v-else>
         <Button type="primary" :loading="manualInpaint.submitting" @click="manualInpaint.confirm()">套用</Button>

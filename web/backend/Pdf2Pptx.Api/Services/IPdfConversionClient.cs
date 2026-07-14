@@ -22,8 +22,13 @@ public interface IPdfConversionClient
     /// `kind` is "background" or "original".</summary>
     Task<HttpResponseMessage> GetPageImageAsync(string jobId, int pageIndex, string kind, CancellationToken ct);
 
+    /// <summary>Re-inpaints a quadrilateral, always sourced from the page's
+    /// current background.</summary>
     Task<PythonBackgroundResponse> InpaintPageRegionAsync(
-        string jobId, int pageIndex, List<List<double>> points, string source, CancellationToken ct);
+        string jobId, int pageIndex, List<List<double>> points, CancellationToken ct);
 
-    Task<PythonBackgroundResponse> RevertPageBackgroundAsync(string jobId, int pageIndex, CancellationToken ct);
+    /// <summary>Copies the original page render's pixels into a quadrilateral
+    /// on the current background -- a plain composite, not inpainting.</summary>
+    Task<PythonBackgroundResponse> RestorePageRegionAsync(
+        string jobId, int pageIndex, List<List<double>> points, CancellationToken ct);
 }

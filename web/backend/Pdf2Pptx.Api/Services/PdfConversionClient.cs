@@ -199,12 +199,12 @@ public sealed class PdfConversionClient(HttpClient httpClient, ILogger<PdfConver
     }
 
     public async Task<PythonBackgroundResponse> InpaintPageRegionAsync(
-        string jobId, int pageIndex, List<List<double>> points, string source, CancellationToken ct)
+        string jobId, int pageIndex, List<List<double>> points, CancellationToken ct)
     {
         using var cts = LinkedTimeout(ct, InpaintTimeout);
         try
         {
-            var payload = new PythonInpaintRequest { Points = points, Source = source };
+            var payload = new PythonRegionRequest { Points = points };
             using var response = await httpClient.PostAsJsonAsync(
                 $"/jobs/{Uri.EscapeDataString(jobId)}/pages/{pageIndex}/inpaint", payload, cts.Token);
             await ThrowIfErrorAsync(response, cts.Token);
@@ -222,13 +222,15 @@ public sealed class PdfConversionClient(HttpClient httpClient, ILogger<PdfConver
         }
     }
 
-    public async Task<PythonBackgroundResponse> RevertPageBackgroundAsync(string jobId, int pageIndex, CancellationToken ct)
+    public async Task<PythonBackgroundResponse> RestorePageRegionAsync(
+        string jobId, int pageIndex, List<List<double>> points, CancellationToken ct)
     {
         using var cts = LinkedTimeout(ct, StatusTimeout);
         try
         {
-            using var response = await httpClient.PostAsync(
-                $"/jobs/{Uri.EscapeDataString(jobId)}/pages/{pageIndex}/revert", null, cts.Token);
+            var payload = new PythonRegionRequest { Points = points };
+            using var response = await httpClient.PostAsJsonAsync(
+                $"/jobs/{Uri.EscapeDataString(jobId)}/pages/{pageIndex}/restore-region", payload, cts.Token);
             await ThrowIfErrorAsync(response, cts.Token);
 
             return await response.Content.ReadFromJsonAsync<PythonBackgroundResponse>(cancellationToken: cts.Token)
@@ -240,7 +242,7 @@ public sealed class PdfConversionClient(HttpClient httpClient, ILogger<PdfConver
         }
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            throw new UpstreamTimeoutException($"Timed out reverting background for job {jobId}", ex);
+            throw new UpstreamTimeoutException($"Timed out restoring background region for job {jobId}", ex);
         }
     }
 

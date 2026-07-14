@@ -3,20 +3,25 @@ import { useSlidesStore } from '@/store'
 import { VIEWPORT_SIZE } from '@/configs/canvas'
 import useHistorySnapshot from '@/hooks/useHistorySnapshot'
 import { usePdf2pptxStore } from './store'
-import { inpaintRegion, revertPage, type InpaintSource } from './api/slides'
+import { inpaintRegion, restoreRegion } from './api/slides'
 
 // PPTist's viewport is always VIEWPORT_SIZE (1000) units wide; pdf2pptx loads
 // its converted slides at a fixed 16:9 ratio (see UploadStage.vue), so the
 // viewport height in the same units is always VIEWPORT_SIZE * this ratio.
 const VIEWPORT_HEIGHT_RATIO = 0.5625
 
+// Which of the two background-repair actions the current area-select session
+// is for -- both share the same "click 4 points" draw step, only what
+// confirm() does with the selected region differs.
+export type ManualInpaintMode = 'restore' | 'inpaint'
+
 export interface ManualInpaintState {
   // Whether the "click 4 points" draw mode is active on the canvas.
   active: boolean
+  mode: ManualInpaintMode | null
   // Collected points, in viewport units (0..1000 x, 0..562.5 y) -- the same
   // coordinate space as PPTElement left/top, not source-image pixels yet.
   points: [number, number][]
-  source: InpaintSource
   submitting: boolean
   error: string | null
 }
@@ -28,8 +33,8 @@ export interface ManualInpaintState {
 export const useManualInpaintStore = defineStore('manualInpaint', {
   state: (): ManualInpaintState => ({
     active: false,
+    mode: null,
     points: [],
-    source: 'current',
     submitting: false,
     error: null,
   }),
@@ -46,19 +51,16 @@ export const useManualInpaintStore = defineStore('manualInpaint', {
   },
 
   actions: {
-    setSource(source: InpaintSource) {
-      this.source = source
-    },
-
-    start(source: InpaintSource) {
+    start(mode: ManualInpaintMode) {
       this.active = true
+      this.mode = mode
       this.points = []
-      this.source = source
       this.error = null
     },
 
     cancel() {
       this.active = false
+      this.mode = null
       this.points = []
       this.submitting = false
     },
@@ -75,7 +77,7 @@ export const useManualInpaintStore = defineStore('manualInpaint', {
     async confirm() {
       const meta = this.currentPageMeta
       const jobId = usePdf2pptxStore().jobId
-      if (!meta || !jobId || this.points.length !== 4) return
+      if (!meta || !jobId || !this.mode || this.points.length !== 4) return
 
       this.submitting = true
       this.error = null
@@ -84,7 +86,10 @@ export const useManualInpaintStore = defineStore('manualInpaint', {
           (x / VIEWPORT_SIZE) * meta.sourceWidth,
           (y / (VIEWPORT_SIZE * VIEWPORT_HEIGHT_RATIO)) * meta.sourceHeight,
         ])
-        const result = await inpaintRegion(jobId, meta.pageIndex, sourcePoints, this.source)
+        const result = this.mode === 'restore'
+          ? await restoreRegion(jobId, meta.pageIndex, sourcePoints)
+          : await inpaintRegion(jobId, meta.pageIndex, sourcePoints)
+
         useSlidesStore().updateSlide({
           background: { type: 'image', image: result.backgroundImage, imageSize: 'stretch' },
         })
@@ -92,29 +97,9 @@ export const useManualInpaintStore = defineStore('manualInpaint', {
         this.cancel()
       }
       catch (err) {
-        this.error = err instanceof Error ? err.message : '去背景文字失敗，請稍後再試。'
-        this.submitting = false
-      }
-    },
-
-    async revertToOriginal() {
-      const meta = this.currentPageMeta
-      const jobId = usePdf2pptxStore().jobId
-      if (!meta || !jobId) return
-
-      this.submitting = true
-      this.error = null
-      try {
-        const result = await revertPage(jobId, meta.pageIndex)
-        useSlidesStore().updateSlide({
-          background: { type: 'image', image: result.backgroundImage, imageSize: 'stretch' },
-        })
-        useHistorySnapshot().addHistorySnapshot()
-      }
-      catch (err) {
-        this.error = err instanceof Error ? err.message : '還原背景失敗，請稍後再試。'
-      }
-      finally {
+        this.error = err instanceof Error
+          ? err.message
+          : this.mode === 'restore' ? '還原區域失敗，請稍後再試。' : '去背景文字失敗，請稍後再試。'
         this.submitting = false
       }
     },

@@ -100,7 +100,7 @@ class PdfToPptxConverter:
                 H, W = img_rgb.shape[:2]
 
                 native_texts = extract_native_text(page, W, H, pw, ph, self.config)
-                ocr_candidates = self.ocr.extract(img_rgb, W, H, self.config)
+                ocr_candidates, ocr_mask_boxes = self.ocr.extract(img_rgb, W, H, self.config)
                 native_texts, ocr_texts = reconcile_native_and_ocr(native_texts, ocr_candidates, self.config)
 
                 watermark_boxes = resolve_watermark_boxes(self.config, W, H)
@@ -111,8 +111,17 @@ class PdfToPptxConverter:
                 ocr_texts = strip_watermark_texts(ocr_texts, watermark_boxes, self.config.watermark_texts)
                 all_texts = native_texts + ocr_texts
 
+                # The erasure mask is driven solely by the OCR model's own
+                # detections (every box it returns, unfiltered -- see
+                # OcrEngine.extract), not by all_texts (the native/OCR-reconciled
+                # set used below for the editable PPTX text boxes). Native vector
+                # text still gets erased fine this way: the OCR pass runs over
+                # the full rendered page image, so it detects that text too --
+                # this just means its *precise* native-PDF position no longer
+                # factors into where erasure happens, only what OCR itself saw.
+                mask_blocks = [{"px_bbox": b} for b in ocr_mask_boxes]
                 clean_bg_rgb = self.inpainter.clean(
-                    img_rgb, all_texts, W, H, self.config,
+                    img_rgb, mask_blocks, W, H, self.config,
                     extra_boxes=watermark_boxes + content_watermark_boxes,
                 )
                 bg_path = bg_dir / f"page_{page_idx}.png"

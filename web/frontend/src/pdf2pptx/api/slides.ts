@@ -29,26 +29,34 @@ export async function getSlides(jobId: string): Promise<SlidesResponse> {
   return (await res.json()) as SlidesResponse
 }
 
-export type InpaintSource = 'original' | 'current'
-
+// Re-inpaints a quadrilateral, always sourced from the page's current
+// background (auto-inpaint result plus any prior manual edits).
 export async function inpaintRegion(
   jobId: string,
   pageIndex: number,
   points: [number, number][],
-  source: InpaintSource,
 ): Promise<BackgroundImageResponse> {
   const res = await fetch(`${API_BASE}/conversions/${encodeURIComponent(jobId)}/pages/${pageIndex}/inpaint`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ points, source }),
+    body: JSON.stringify({ points }),
   })
   if (!res.ok) throw new ApiError(res.status, await parseErrorMessage(res))
   return (await res.json()) as BackgroundImageResponse
 }
 
-export async function revertPage(jobId: string, pageIndex: number): Promise<BackgroundImageResponse> {
-  const res = await fetch(`${API_BASE}/conversions/${encodeURIComponent(jobId)}/pages/${pageIndex}/revert`, {
+// Copies the original (pre-inpaint) page render's pixels into a quadrilateral
+// on the current background -- a plain composite, not inpainting, for
+// undoing auto/manual inpainting in just that region.
+export async function restoreRegion(
+  jobId: string,
+  pageIndex: number,
+  points: [number, number][],
+): Promise<BackgroundImageResponse> {
+  const res = await fetch(`${API_BASE}/conversions/${encodeURIComponent(jobId)}/pages/${pageIndex}/restore-region`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ points }),
   })
   if (!res.ok) throw new ApiError(res.status, await parseErrorMessage(res))
   return (await res.json()) as BackgroundImageResponse
