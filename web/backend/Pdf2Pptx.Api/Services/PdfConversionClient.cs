@@ -27,6 +27,10 @@ public sealed class PdfConversionClient(HttpClient httpClient, ILogger<PdfConver
     private static readonly TimeSpan UploadTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan StatusTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan DownloadTimeout = TimeSpan.FromMinutes(5);
+    // Manual inpaint reuses the same GPU-serialized executor as ordinary
+    // conversion jobs on the Python side, so it can queue behind an in-flight
+    // conversion -- budget it generously rather than timing out a legitimate wait.
+    private static readonly TimeSpan InpaintTimeout = TimeSpan.FromMinutes(3);
 
     public async Task<bool> IsHealthyAsync(CancellationToken ct)
     {
@@ -137,6 +141,106 @@ public sealed class PdfConversionClient(HttpClient httpClient, ILogger<PdfConver
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
         {
             throw new UpstreamTimeoutException($"Timed out downloading result for job {jobId}", ex);
+        }
+    }
+
+    public async Task<PythonSlidesResponse> GetSlidesAsync(string jobId, CancellationToken ct)
+    {
+        using var cts = LinkedTimeout(ct, StatusTimeout);
+        try
+        {
+            using var response = await httpClient.GetAsync($"/jobs/{Uri.EscapeDataString(jobId)}/slides", cts.Token);
+            // No jobId passed here: a 404 from this endpoint can mean an unknown
+            // job OR a job with no page data yet, and Python's own detail message
+            // already distinguishes them -- let it flow through PythonServiceException
+            // rather than being flattened into JobNotFoundException's fixed message.
+            await ThrowIfErrorAsync(response, cts.Token);
+
+            return await response.Content.ReadFromJsonAsync<PythonSlidesResponse>(cancellationToken: cts.Token)
+                ?? throw new UpstreamServiceUnavailableException("Conversion service returned an empty response");
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new UpstreamServiceUnavailableException("Conversion service is unavailable", ex);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new UpstreamTimeoutException($"Timed out fetching slides for job {jobId}", ex);
+        }
+    }
+
+    public async Task<HttpResponseMessage> GetPageImageAsync(string jobId, int pageIndex, string kind, CancellationToken ct)
+    {
+        using var cts = LinkedTimeout(ct, DownloadTimeout);
+        try
+        {
+            var request = new HttpRequestMessage(
+                HttpMethod.Get, $"/jobs/{Uri.EscapeDataString(jobId)}/pages/{pageIndex}/{kind}.png");
+            var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            try
+            {
+                await ThrowIfErrorAsync(response, cts.Token);
+            }
+            catch
+            {
+                response.Dispose();
+                throw;
+            }
+            return response;
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new UpstreamServiceUnavailableException("Conversion service is unavailable", ex);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new UpstreamTimeoutException($"Timed out downloading page image for job {jobId}", ex);
+        }
+    }
+
+    public async Task<PythonBackgroundResponse> InpaintPageRegionAsync(
+        string jobId, int pageIndex, List<List<double>> points, string source, CancellationToken ct)
+    {
+        using var cts = LinkedTimeout(ct, InpaintTimeout);
+        try
+        {
+            var payload = new PythonInpaintRequest { Points = points, Source = source };
+            using var response = await httpClient.PostAsJsonAsync(
+                $"/jobs/{Uri.EscapeDataString(jobId)}/pages/{pageIndex}/inpaint", payload, cts.Token);
+            await ThrowIfErrorAsync(response, cts.Token);
+
+            return await response.Content.ReadFromJsonAsync<PythonBackgroundResponse>(cancellationToken: cts.Token)
+                ?? throw new UpstreamServiceUnavailableException("Conversion service returned an empty response");
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new UpstreamServiceUnavailableException("Conversion service is unavailable", ex);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new UpstreamTimeoutException($"Timed out running manual inpaint for job {jobId}", ex);
+        }
+    }
+
+    public async Task<PythonBackgroundResponse> RevertPageBackgroundAsync(string jobId, int pageIndex, CancellationToken ct)
+    {
+        using var cts = LinkedTimeout(ct, StatusTimeout);
+        try
+        {
+            using var response = await httpClient.PostAsync(
+                $"/jobs/{Uri.EscapeDataString(jobId)}/pages/{pageIndex}/revert", null, cts.Token);
+            await ThrowIfErrorAsync(response, cts.Token);
+
+            return await response.Content.ReadFromJsonAsync<PythonBackgroundResponse>(cancellationToken: cts.Token)
+                ?? throw new UpstreamServiceUnavailableException("Conversion service returned an empty response");
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new UpstreamServiceUnavailableException("Conversion service is unavailable", ex);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new UpstreamTimeoutException($"Timed out reverting background for job {jobId}", ex);
         }
     }
 

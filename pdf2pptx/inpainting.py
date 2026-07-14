@@ -166,7 +166,25 @@ class Inpainter:
             return img_rgb
 
         grid_lines = _detect_grid_lines(img_rgb, mask, W, H, config) if config.protect_grid_lines else []
+        return self._composite(img_rgb, mask, W, H, config, grid_lines)
 
+    def clean_polygon(self, img_rgb, polygon, W, H, config):
+        """Inpaint an arbitrary user-drawn polygon region (e.g. a manually
+        click-selected quadrilateral in the web editor), rather than the
+        padded text-line rectangles `clean` builds its mask from. Shares the
+        same LaMa/grid-line-protection path as `clean` -- only the mask
+        construction differs.
+        """
+        mask = np.zeros((H, W), dtype=np.uint8)
+        pts = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
+        cv2.fillPoly(mask, [pts], 255)
+        if not mask.any():
+            return img_rgb
+
+        grid_lines = _detect_grid_lines(img_rgb, mask, W, H, config) if config.protect_grid_lines else []
+        return self._composite(img_rgb, mask, W, H, config, grid_lines)
+
+    def _composite(self, img_rgb, mask, W, H, config, grid_lines):
         long_side = max(W, H)
         scale = min(1.0, config.lama_max_dim / long_side)
         if scale < 1.0:

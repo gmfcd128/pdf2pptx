@@ -49,12 +49,26 @@ class PdfToPptxConverter:
         self.inpainter = Inpainter()
         logger.info("LaMa inpainting device: %s", self.inpainter.device)
 
-    def convert(self, pdf_path, output_pptx_path, background_dir=None, progress_callback=None) -> ConversionResult:
+    def convert(
+        self,
+        pdf_path,
+        output_pptx_path,
+        background_dir=None,
+        progress_callback=None,
+        page_asset_callback=None,
+    ) -> ConversionResult:
         """Run the full pipeline on one PDF.
 
         progress_callback, if given, is called as progress_callback(page_index_1_based,
         total_pages) after each page finishes -- useful for surfacing job progress in a
         long-running service.
+
+        page_asset_callback, if given, is called as page_asset_callback(page_idx,
+        img_rgb, clean_bg_rgb, all_texts, W, H) once per page (page_idx 0-based), right
+        after that page's background has been inpainted -- lets a caller persist the raw
+        render, the cleaned background, and the reconciled text blocks for later use
+        (e.g. the web service's per-page editable-slide JSON) without this method
+        needing to know anything about that consumer.
         """
         pdf_path = Path(pdf_path)
         output_pptx_path = Path(output_pptx_path)
@@ -103,6 +117,9 @@ class PdfToPptxConverter:
                 )
                 bg_path = bg_dir / f"page_{page_idx}.png"
                 cv2.imwrite(str(bg_path), cv2.cvtColor(clean_bg_rgb, cv2.COLOR_RGB2BGR))
+
+                if page_asset_callback:
+                    page_asset_callback(page_idx, img_rgb, clean_bg_rgb, all_texts, W, H)
 
                 slide = prs.slides.add_slide(blank_layout)
                 slide.shapes.add_picture(str(bg_path), 0, 0, width=prs.slide_width, height=prs.slide_height)

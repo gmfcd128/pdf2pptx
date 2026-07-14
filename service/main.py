@@ -12,6 +12,7 @@ Run with:
 """
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -19,15 +20,18 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import List, Literal, Optional, Tuple
 
+import cv2
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from pdf2pptx import PdfToPptxConverter, PipelineConfig
 
 from .jobs import JobStatus, JobStore
+from .pptist import build_slide_json
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +60,22 @@ async def _worker_loop():
             def progress_cb(page, total, _job=job):
                 _job.progress = f"{page}/{total}"
 
+            def page_asset_cb(page_idx, img_rgb, clean_bg_rgb, all_texts, W, H, _job=job):
+                # Persists the raw render, the auto-inpainted background, and the
+                # reconciled text blocks (as PPTist-ready slide JSON) per page --
+                # this is what GET /jobs/{id}/slides and the manual inpaint/revert
+                # endpoints below read from and write back to. Runs on this same
+                # executor thread as the rest of the conversion (only one job
+                # processes at a time), so plain synchronous file IO is fine here.
+                page_dir = _job.input_path.parent / "pages" / str(page_idx)
+                page_dir.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(page_dir / "original.png"), cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(str(page_dir / "background.png"), cv2.cvtColor(clean_bg_rgb, cv2.COLOR_RGB2BGR))
+                slide = build_slide_json(page_idx, all_texts, W, H, converter.config)
+                (page_dir / "slide.json").write_text(json.dumps(slide), encoding="utf-8")
+
             await loop.run_in_executor(
-                executor, converter.convert, job.input_path, job.output_path, None, progress_cb
+                executor, converter.convert, job.input_path, job.output_path, None, progress_cb, page_asset_cb
             )
             job.status = JobStatus.DONE
         except Exception as exc:
@@ -81,6 +99,41 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="pdf2pptx", lifespan=lifespan)
+
+
+class InpaintRequest(BaseModel):
+    points: List[Tuple[float, float]]
+    source: Literal["original", "current"] = "current"
+
+
+def _require_page_dir(job_id: str, page_index: int) -> Path:
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job id")
+    if job.status != JobStatus.DONE:
+        raise HTTPException(status_code=409, detail=f"Job is not finished yet (status: {job.status})")
+    page_dir = job.input_path.parent / "pages" / str(page_index)
+    if not page_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Unknown page {page_index} for job {job_id}")
+    return page_dir
+
+
+def _page_image_response(job_id: str, page_index: int, filename: str) -> FileResponse:
+    page_dir = _require_page_dir(job_id, page_index)
+    path = page_dir / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"No {filename} for job {job_id} page {page_index}")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/")
+async def root():
+    # This service is a backend-only JSON API meant to sit behind the ASP.NET
+    # proxy (web/backend) -- there is no browser UI here. A bare GET / (e.g.
+    # someone opening http://localhost:8000 directly instead of the frontend's
+    # port) used to 404 with no explanation; this just points them at what
+    # actually exists instead.
+    return {"service": "pdf2pptx", "docs": "/docs", "health": "/health"}
 
 
 @app.get("/health")
@@ -119,6 +172,7 @@ async def get_job(job_id: str):
         "progress": job.progress,
         "error": job.error,
         "result_url": f"/jobs/{job_id}/result" if job.status == JobStatus.DONE else None,
+        "slides_url": f"/jobs/{job_id}/slides" if job.status == JobStatus.DONE else None,
     }
 
 
@@ -134,3 +188,87 @@ async def get_job_result(job_id: str):
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=job.output_path.name,
     )
+
+
+@app.get("/jobs/{job_id}/slides")
+async def get_job_slides(job_id: str):
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job id")
+    if job.status != JobStatus.DONE:
+        raise HTTPException(status_code=409, detail=f"Job is not finished yet (status: {job.status})")
+
+    pages_dir = job.input_path.parent / "pages"
+    if not pages_dir.is_dir():
+        raise HTTPException(status_code=404, detail="No page data for this job")
+
+    slides = []
+    for page_dir in sorted(pages_dir.iterdir(), key=lambda p: int(p.name)):
+        slide_json_path = page_dir / "slide.json"
+        if not slide_json_path.exists():
+            continue
+        slide = json.loads(slide_json_path.read_text(encoding="utf-8"))
+        idx = slide["page_index"]
+        bg_path = page_dir / "background.png"
+        slide["background_path"] = f"pages/{idx}/background.png"
+        slide["background_version"] = int(bg_path.stat().st_mtime * 1000)
+        slide["original_path"] = f"pages/{idx}/original.png"
+        slides.append(slide)
+
+    return {"viewport_ratio": 0.5625, "slides": slides}
+
+
+@app.get("/jobs/{job_id}/pages/{page_index}/background.png")
+async def get_page_background(job_id: str, page_index: int):
+    return _page_image_response(job_id, page_index, "background.png")
+
+
+@app.get("/jobs/{job_id}/pages/{page_index}/original.png")
+async def get_page_original(job_id: str, page_index: int):
+    return _page_image_response(job_id, page_index, "original.png")
+
+
+@app.post("/jobs/{job_id}/pages/{page_index}/inpaint")
+async def inpaint_page_region(job_id: str, page_index: int, body: InpaintRequest):
+    if len(body.points) != 4:
+        raise HTTPException(status_code=400, detail="points must contain exactly 4 [x, y] pairs")
+
+    page_dir = _require_page_dir(job_id, page_index)
+    source_name = "original.png" if body.source == "original" else "background.png"
+    source_path = page_dir / source_name
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail=f"No {source_name} for job {job_id} page {page_index}")
+
+    img_bgr = cv2.imread(str(source_path))
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    H, W = img_rgb.shape[:2]
+
+    loop = asyncio.get_running_loop()
+    # Shares the single-worker executor with ordinary conversion jobs -- LaMa
+    # inpainting is GPU work and must stay serialized with everything else that
+    # touches the model, not just with other manual-inpaint calls.
+    result_rgb = await loop.run_in_executor(
+        executor, converter.inpainter.clean_polygon, img_rgb, body.points, W, H, converter.config
+    )
+
+    bg_path = page_dir / "background.png"
+    cv2.imwrite(str(bg_path), cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR))
+    return {
+        "background_path": f"pages/{page_index}/background.png",
+        "background_version": int(bg_path.stat().st_mtime * 1000),
+    }
+
+
+@app.post("/jobs/{job_id}/pages/{page_index}/revert")
+async def revert_page_background(job_id: str, page_index: int):
+    page_dir = _require_page_dir(job_id, page_index)
+    original_path = page_dir / "original.png"
+    if not original_path.exists():
+        raise HTTPException(status_code=404, detail=f"No original render for job {job_id} page {page_index}")
+
+    bg_path = page_dir / "background.png"
+    shutil.copyfile(original_path, bg_path)
+    return {
+        "background_path": f"pages/{page_index}/background.png",
+        "background_version": int(bg_path.stat().st_mtime * 1000),
+    }

@@ -1,99 +1,69 @@
-<script setup lang="ts">
-import { computed } from 'vue'
-import FileUpload from './components/FileUpload.vue'
-import ConversionProgress from './components/ConversionProgress.vue'
-import DownloadButton from './components/DownloadButton.vue'
-import { useConversionJob } from './composables/useConversionJob'
-
-const { jobId, status, progress, error, submit, reset } = useConversionJob()
-
-const isActive = computed(() => status.value !== null)
-const isFinished = computed(() => status.value === 'done' || status.value === 'failed')
-
-function onSelect(file: File) {
-  void submit(file)
-}
-</script>
-
 <template>
-  <div class="page">
-    <header class="header">
-      <h1>PDF 轉 PPTX 轉換工具</h1>
-      <p class="subtitle">上傳影像化的 PDF，自動辨識文字並轉換為可編輯的 PowerPoint 簡報</p>
-    </header>
-
-    <main class="card">
-      <FileUpload v-if="!isActive" @select="onSelect" />
-
-      <div v-else class="job-panel">
-        <ConversionProgress :status="status" :progress="progress" :error="error" />
-        <div v-if="isFinished" class="actions">
-          <DownloadButton v-if="status === 'done' && jobId" :job-id="jobId" />
-          <button class="reset-button" @click="reset">轉換另一份檔案</button>
-        </div>
-      </div>
-    </main>
-  </div>
+  <UploadStage v-if="stage === 'upload'" />
+  <Screen v-else-if="screening" />
+  <Editor v-else-if="isPC" />
+  <Mobile v-else />
 </template>
 
-<style scoped>
-.page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 3rem 1.5rem;
-}
+<script lang="ts">
+import { defineComponent, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useScreenStore, useMainStore, useSnapshotStore } from '@/store'
+import { LOCALSTORAGE_KEY_DISCARDED_DB } from '@/configs/storage'
+import { isPC } from './utils/common'
+import { usePdf2pptxStore } from './pdf2pptx/store'
 
-.header {
-  text-align: center;
-  margin-bottom: 2rem;
-}
+import Editor from './views/Editor/index.vue'
+import Screen from './views/Screen/index.vue'
+import Mobile from './views/Mobile.vue'
+import UploadStage from './pdf2pptx/UploadStage.vue'
 
-.header h1 {
-  font-size: 1.75rem;
-  margin: 0 0 0.5rem;
-  color: #111827;
-}
+export default defineComponent({
+  name: 'app',
+  components: {
+    Editor,
+    Screen,
+    Mobile,
+    UploadStage,
+  },
+  setup() {
+    const mainStore = useMainStore()
+    const snapshotStore = useSnapshotStore()
+    const { databaseId } = storeToRefs(mainStore)
+    const { screening } = storeToRefs(useScreenStore())
+    const { stage } = storeToRefs(usePdf2pptxStore())
 
-.subtitle {
-  color: #6b7280;
-  margin: 0;
-}
+    if (process.env.NODE_ENV === 'production') {
+      window.onbeforeunload = () => false
+    }
 
-.card {
-  width: 100%;
-  max-width: 560px;
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  padding: 1.5rem;
-}
+    onMounted(() => {
+      snapshotStore.initSnapshotDatabase()
+      mainStore.setAvailableFonts()
+    })
 
-.job-panel {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
+    // 应用注销时向 localStorage 中记录下本次 indexedDB 的数据库ID，用于之后清除数据库
+    window.addEventListener('unload', () => {
+      const discardedDB = localStorage.getItem(LOCALSTORAGE_KEY_DISCARDED_DB)
+      const discardedDBList: string[] = discardedDB ? JSON.parse(discardedDB) : []
 
-.actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-}
+      discardedDBList.push(databaseId.value)
 
-.reset-button {
-  background: none;
-  border: none;
-  color: #3b82f6;
-  font-size: 0.95rem;
-  cursor: pointer;
-  padding: 0.25rem;
-}
+      const newDiscardedDB = JSON.stringify(discardedDBList)
+      localStorage.setItem(LOCALSTORAGE_KEY_DISCARDED_DB, newDiscardedDB)
+    })
 
-.reset-button:hover {
-  text-decoration: underline;
+    return {
+      stage,
+      screening,
+      isPC: isPC(),
+    }
+  },
+})
+</script>
+
+<style lang="scss">
+#app {
+  height: 100%;
 }
 </style>

@@ -77,4 +77,65 @@ public sealed class ConversionsController(IPdfConversionClient conversionClient)
 
         return new FileStreamResult(stream, PptxMediaType) { FileDownloadName = fileName.Trim('"') };
     }
+
+    private const string PngMediaType = "image/png";
+
+    /// <summary>Returns every page as a PPTist-ready editable slide. Image URLs
+    /// are rewritten to route back through this API (never exposing the Python
+    /// container's own address to the browser) and carry a `?v=` cache-busting
+    /// query derived from the background file's current version, so the browser
+    /// re-fetches it after a manual inpaint/revert.</summary>
+    [HttpGet("{jobId}/slides")]
+    public async Task<IActionResult> GetSlides(string jobId, CancellationToken ct)
+    {
+        var upstream = await conversionClient.GetSlidesAsync(jobId, ct);
+        var slides = upstream.Slides.Select(s => new SlideDto(
+            s.Id,
+            s.PageIndex,
+            s.SourceWidth,
+            s.SourceHeight,
+            $"/api/conversions/{jobId}/pages/{s.PageIndex}/background.png?v={s.BackgroundVersion}",
+            $"/api/conversions/{jobId}/pages/{s.PageIndex}/original.png",
+            s.Elements)).ToList();
+
+        return Ok(new SlidesResponse(upstream.ViewportRatio, slides));
+    }
+
+    [HttpGet("{jobId}/pages/{pageIndex}/background.png")]
+    public Task<IActionResult> GetPageBackground(string jobId, int pageIndex, CancellationToken ct) =>
+        StreamPageImageAsync(jobId, pageIndex, "background", ct);
+
+    [HttpGet("{jobId}/pages/{pageIndex}/original.png")]
+    public Task<IActionResult> GetPageOriginal(string jobId, int pageIndex, CancellationToken ct) =>
+        StreamPageImageAsync(jobId, pageIndex, "original", ct);
+
+    /// <summary>Re-inpaints a user-drawn quadrilateral on one page, from either
+    /// the original un-inpainted render or the current background, and replaces
+    /// that page's background with the result.</summary>
+    [HttpPost("{jobId}/pages/{pageIndex}/inpaint")]
+    public async Task<IActionResult> InpaintPageRegion(
+        string jobId, int pageIndex, [FromBody] InpaintRequest request, CancellationToken ct)
+    {
+        var result = await conversionClient.InpaintPageRegionAsync(jobId, pageIndex, request.Points, request.Source, ct);
+        return Ok(new BackgroundImageResponse(
+            $"/api/conversions/{jobId}/pages/{pageIndex}/background.png?v={result.BackgroundVersion}"));
+    }
+
+    /// <summary>Discards any auto/manual inpainting on this page and restores its
+    /// background to the original, un-inpainted page render.</summary>
+    [HttpPost("{jobId}/pages/{pageIndex}/revert")]
+    public async Task<IActionResult> RevertPageBackground(string jobId, int pageIndex, CancellationToken ct)
+    {
+        var result = await conversionClient.RevertPageBackgroundAsync(jobId, pageIndex, ct);
+        return Ok(new BackgroundImageResponse(
+            $"/api/conversions/{jobId}/pages/{pageIndex}/background.png?v={result.BackgroundVersion}"));
+    }
+
+    private async Task<IActionResult> StreamPageImageAsync(string jobId, int pageIndex, string kind, CancellationToken ct)
+    {
+        var upstream = await conversionClient.GetPageImageAsync(jobId, pageIndex, kind, ct);
+        HttpContext.Response.RegisterForDispose(upstream);
+        var stream = await upstream.Content.ReadAsStreamAsync(ct);
+        return new FileStreamResult(stream, PngMediaType);
+    }
 }
