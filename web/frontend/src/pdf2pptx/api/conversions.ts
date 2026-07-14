@@ -39,7 +39,3 @@ export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   if (!res.ok) throw new ApiError(res.status, await parseErrorMessage(res))
   return (await res.json()) as JobStatusResponse
 }
-
-export function resultDownloadUrl(jobId: string): string {
-  return `${API_BASE}/conversions/${encodeURIComponent(jobId)}/result`
-}

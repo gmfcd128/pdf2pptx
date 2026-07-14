@@ -1,9 +1,9 @@
 <template>
   <div v-if="status" class="progress-panel">
     <div v-if="status !== 'failed'" class="status-row">
-      <span v-if="status === 'queued' || status === 'processing'" class="spinner"></span>
-      <span class="status-label">{{ statusLabel }}</span>
-      <span v-if="progressLabel" class="progress-text">{{ progressLabel }}</span>
+      <span v-if="status === 'queued' || status === 'processing' || loadingEditor" class="spinner"></span>
+      <span class="status-label">{{ loadingEditor ? '正在載入編輯器…' : statusLabel }}</span>
+      <span v-if="progressLabel && !loadingEditor" class="progress-text">{{ progressLabel }}</span>
     </div>
     <div v-else class="error-row">
       <span class="status-label error">{{ statusLabel }}</span>
@@ -30,6 +30,10 @@ export default defineComponent({
     error: {
       type: String as PropType<string | null>,
       default: null,
+    },
+    loadingEditor: {
+      type: Boolean,
+      default: false,
     },
   },
   setup(props) {

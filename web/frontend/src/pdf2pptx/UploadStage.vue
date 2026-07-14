@@ -9,14 +9,8 @@
       <FileUpload v-if="!isActive" @select="onSelect" />
 
       <div v-else class="job-panel">
-        <ConversionProgress :status="status" :progress="progress" :error="error" />
-        <div v-if="isFinished" class="actions">
-          <template v-if="status === 'done' && jobId">
-            <Button type="primary" :loading="loadingEditor" @click="openEditor">
-              {{ loadingEditor ? '載入中…' : '開始編輯' }}
-            </Button>
-            <DownloadButton :job-id="jobId" />
-          </template>
+        <ConversionProgress :status="status" :progress="progress" :error="error" :loading-editor="loadingEditor" />
+        <div v-if="status === 'failed' || loadError" class="actions">
           <p v-if="loadError" class="upload-error">{{ loadError }}</p>
           <button class="reset-button" @click="reset">轉換另一份檔案</button>
         </div>
@@ -26,7 +20,7 @@
 </template>
 
 <script lang="ts">
-import { computed, defineComponent, ref } from 'vue'
+import { computed, defineComponent, ref, watch } from 'vue'
 import { useSlidesStore } from '@/store'
 import type { PPTElement, Slide } from '@/types/slides'
 import { useConversionJob } from './composables/useConversionJob'
@@ -34,14 +28,12 @@ import { getSlides } from './api/slides'
 import { usePdf2pptxStore, type PageMeta } from './store'
 import FileUpload from './components/FileUpload.vue'
 import ConversionProgress from './components/ConversionProgress.vue'
-import DownloadButton from './components/DownloadButton.vue'
 
 export default defineComponent({
   name: 'upload-stage',
   components: {
     FileUpload,
     ConversionProgress,
-    DownloadButton,
   },
   setup() {
     const { jobId, status, progress, error, submit, reset: resetJob } = useConversionJob()
@@ -49,7 +41,6 @@ export default defineComponent({
     const pdf2pptxStore = usePdf2pptxStore()
 
     const isActive = computed(() => status.value !== null)
-    const isFinished = computed(() => status.value === 'done' || status.value === 'failed')
 
     const loadingEditor = ref(false)
     const loadError = ref<string | null>(null)
@@ -102,18 +93,24 @@ export default defineComponent({
       }
     }
 
+    // Auto-advance straight into the editor as soon as conversion finishes --
+    // no manual "開始編輯" click in between. Watching status (rather than
+    // calling openEditor directly from the poll callback) keeps this the
+    // single place that reacts to a job reaching 'done', regardless of what
+    // triggers that transition.
+    watch(status, value => {
+      if (value === 'done') void openEditor()
+    })
+
     return {
-      jobId,
       status,
       progress,
       error,
       isActive,
-      isFinished,
       loadingEditor,
       loadError,
       onSelect,
       reset,
-      openEditor,
     }
   },
 })
