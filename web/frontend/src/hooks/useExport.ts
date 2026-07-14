@@ -353,7 +353,16 @@ export default () => {
       if (slide.background) {
         const background = slide.background
         if (background.type === 'image' && background.image) {
-          pptxSlide.background = { data: background.image }
+          // background.image is usually a base64 data URL (set via
+          // SlideDesignPanel's file picker, see utils/image.ts's
+          // getImageDataURL), but pdf2pptx-converted slides set it to a
+          // plain same-origin URL instead (the job's background.png, see
+          // pdf2pptx/UploadStage.vue and useManualInpaint.ts) -- passing a
+          // plain URL as `data` makes pptxgenjs try to treat it as base64
+          // image data, which fails and rejects the whole export.
+          pptxSlide.background = background.image.startsWith('data:')
+            ? { data: background.image }
+            : { path: background.image }
         }
         else if (background.type === 'solid' && background.color) {
           const c = formatColor(background.color)
@@ -374,6 +383,8 @@ export default () => {
         if (el.type === 'text') {
           const textProps = formatHTML(el.content)
 
+          const inset = el.inset || [10, 10, 10, 10]
+
           const options: pptxgen.TextPropsOptions = {
             x: el.left / 100,
             y: el.top / 100,
@@ -383,7 +394,10 @@ export default () => {
             fontFace: '微软雅黑',
             color: '#000000',
             valign: 'top',
-            margin: 10 * 0.75,
+            // pptxgenjs margin array order is [left, right, bottom, top];
+            // inset is [top, right, bottom, left] (same as PPTist's own
+            // TextInset -- see types/slides.ts and TextStylePanel.vue).
+            margin: [inset[3], inset[1], inset[2], inset[0]].map((v: number) => v * 0.75) as [number, number, number, number],
             paraSpaceBefore: 5 * 0.75,
             lineSpacingMultiple: 1.5 / 1.25,
             autoFit: true,

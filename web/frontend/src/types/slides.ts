@@ -107,28 +107,32 @@ interface PPTBaseElement {
 }
 
 
+export type TextInset = [number, number, number, number]
+
 /**
  * 文本元素
- * 
+ *
  * type: 元素类型（text）
- * 
+ *
  * content: 文本内容（HTML字符串）
- * 
+ *
  * defaultFontName: 默认字体（会被文本内容中的HTML内联样式覆盖）
- * 
+ *
  * defaultColor: 默认颜色（会被文本内容中的HTML内联样式覆盖）
- * 
+ *
  * outline?: 边框
- * 
+ *
  * fill?: 填充色
- * 
+ *
  * lineHeight?: 行高（倍），默认1.5
- * 
+ *
  * wordSpace?: 字间距，默认0
- * 
+ *
  * opacity?: 不透明度，默认1
- * 
+ *
  * shadow?: 阴影
+ *
+ * inset?: 内边距（上、右、下、左），默认[10, 10, 10, 10]
  */
 export interface PPTTextElement extends PPTBaseElement {
   type: 'text';
@@ -141,6 +145,7 @@ export interface PPTTextElement extends PPTBaseElement {
   wordSpace?: number;
   opacity?: number;
   shadow?: PPTElementShadow;
+  inset?: TextInset;
 }
 
 

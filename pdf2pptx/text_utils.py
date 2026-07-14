@@ -2,6 +2,49 @@ def has_cjk(s):
     return any("一" <= ch <= "鿿" for ch in s)
 
 
+# Standard full-width/half-width approximation for CJK UI fonts: a CJK
+# character is roughly as wide as it is tall (~1em advance), other characters
+# (Latin letters, digits, punctuation) roughly half that.
+_CJK_CHAR_EM = 1.0
+_OTHER_CHAR_EM = 0.55
+
+
+def estimate_line_em_width(text):
+    """Rough rendered-width estimate for one line of text, in em (multiply by
+    the font size in points to get a width in points). See
+    estimate_font_size_pt's docstring for why this exists."""
+    return sum(_CJK_CHAR_EM if "一" <= ch <= "鿿" else _OTHER_CHAR_EM for ch in text)
+
+
+def estimate_font_size_pt(text, w_px, h_px, img_w_px, img_h_px, config):
+    """Estimate a PPTX font size (pt) for one detected OCR text line.
+
+    PaddleOCR reports a box but no font size, so this starts from box height
+    (a fixed height/font-size ratio, tuned empirically against this document
+    family) -- but height alone doesn't guarantee the text actually fits the
+    box's own detected *width* once rendered in whatever font PowerPoint
+    substitutes (this document family's real source fonts aren't embedded or
+    otherwise knowable), and a substituted font can be wider per character
+    than the tuned height ratio assumes -- most visible on long CJK/mixed-
+    script lines, e.g. page titles. Capping by a width estimate
+    (estimate_line_em_width) keeps the rendered line within the box PaddleOCR
+    actually detected, at the cost of a slightly smaller font on the (rare,
+    mostly title-length) lines where the two estimates disagree -- much less
+    visually different from the source PDF than word-wrapping into an extra
+    line that doesn't exist there.
+    """
+    height_pt = max(6.0, h_px * (config.slide_h_in / img_h_px) * 72 * 0.8)
+    em_width = estimate_line_em_width(text)
+    if em_width <= 0:
+        return height_pt
+    avail_w_pt = (w_px / img_w_px) * config.slide_w_in * 72
+    # Target a bit under the full available width, not the exact boundary --
+    # this estimate is a rough approximation of real font metrics, not a
+    # measurement of them.
+    width_pt = (avail_w_pt / em_width) * 0.95
+    return max(6.0, min(height_pt, width_pt))
+
+
 def resolve_font(font_name, text):
     if has_cjk(text):
         return "Microsoft JhengHei"

@@ -239,6 +239,23 @@
     </div>
 
     <Divider />
+
+    <div class="row">
+      <div style="flex: 2;">上边距：</div>
+      <InputNumber style="flex: 3;" :min="0" :max="50" :value="inset[0]" @change="value => updateInset(0, value)" />
+      <div style="flex: 1;"></div>
+      <div style="flex: 2;">下边距：</div>
+      <InputNumber style="flex: 3;" :min="0" :max="50" :value="inset[2]" @change="value => updateInset(2, value)" />
+    </div>
+    <div class="row">
+      <div style="flex: 2;">左边距：</div>
+      <InputNumber style="flex: 3;" :min="0" :max="50" :value="inset[3]" @change="value => updateInset(3, value)" />
+      <div style="flex: 1;"></div>
+      <div style="flex: 2;">右边距：</div>
+      <InputNumber style="flex: 3;" :min="0" :max="50" :value="inset[1]" @change="value => updateInset(1, value)" />
+    </div>
+
+    <Divider />
     <ElementOutline />
     <Divider />
     <ElementShadow />
@@ -251,7 +268,7 @@
 import { defineComponent, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMainStore, useSlidesStore } from '@/store'
-import { PPTTextElement } from '@/types/slides'
+import { PPTTextElement, TextInset } from '@/types/slides'
 import emitter, { EmitterEvents, RichTextAction } from '@/utils/emitter'
 import { WEB_FONTS } from '@/configs/font'
 import useHistorySnapshot from '@/hooks/useHistorySnapshot'
@@ -359,6 +376,7 @@ export default defineComponent({
     const fill = ref<string>()
     const lineHeight = ref<number>()
     const wordSpace = ref<number>()
+    const inset = ref<TextInset>([10, 10, 10, 10])
 
     watch(handleElement, () => {
       if (!handleElement.value || handleElement.value.type !== 'text') return
@@ -366,6 +384,7 @@ export default defineComponent({
       fill.value = handleElement.value.fill || '#fff'
       lineHeight.value = handleElement.value.lineHeight || 1.5
       wordSpace.value = handleElement.value.wordSpace || 0
+      inset.value = handleElement.value.inset || [10, 10, 10, 10]
     }, { deep: true, immediate: true })
 
     const fontSizeOptions = [
@@ -389,6 +408,13 @@ export default defineComponent({
     // 设置文本框填充
     const updateFill = (value: string) => {
       updateElement({ fill: value })
+    }
+
+    // 设置文本框内边距（上、右、下、左）
+    const updateInset = (index: number, value: number) => {
+      const _inset: TextInset = [...inset.value]
+      _inset[index] = value
+      updateElement({ inset: _inset })
     }
 
     // 发射富文本设置命令
@@ -424,6 +450,7 @@ export default defineComponent({
       fill,
       lineHeight,
       wordSpace,
+      inset,
       richTextAttrs,
       availableFonts,
       webFonts,
@@ -433,6 +460,7 @@ export default defineComponent({
       updateLineHeight,
       updateWordSpace,
       updateFill,
+      updateInset,
       emitRichTextCommand,
       emitBatchRichTextCommand,
       presetStyles,

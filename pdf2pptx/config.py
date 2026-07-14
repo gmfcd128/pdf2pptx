@@ -40,7 +40,35 @@ class PipelineConfig:
     # beyond noise in the detector.
     ocr_min_rotation_deg: float = 2.0
 
-    junk_chars: frozenset = field(default_factory=lambda: frozenset("=|#*^~`\\{}<>[]_"))
+    # Deliberately excludes `[`/`]`: bracketed short tags (e.g. a "[LLM]" or
+    # "[製造業]" category badge) are common, legitimate label text, not OCR
+    # noise -- text_utils.looks_like_garbage's junk>=2 rule would otherwise
+    # reject every one of them outright, since a single well-formed bracket
+    # pair alone already hits that count regardless of how clean the rest of
+    # the text is.
+    junk_chars: frozenset = field(default_factory=lambda: frozenset("=|#*^~`\\{}<>_"))
+
+    # Text box inset -- the gap kept between a text box's own edges and where
+    # its glyphs actually draw, as (top, right, bottom, left) points (same
+    # axis order as PPTist's own TextInset, which this mirrors -- see
+    # service/pptist.py and web/frontend's TextStylePanel). Applied two ways
+    # that must stay in sync: slide_builder.add_text_box grows a detected text
+    # line's tight px_bbox outward by this amount on each respective side (so
+    # the box's edges land here, not the glyphs) and sets it as the real PPTX
+    # text-frame margin (tf.margin_*) so PowerPoint actually insets the text
+    # back in by the same amount -- net effect, the glyphs render exactly
+    # where they were detected in the source PDF, with this inset as pure
+    # breathing room around them rather than a positional offset. Defaults
+    # preserve this document family's previously tuned look, where a flat
+    # 0.3in/0.1in was added to a box's raw width/height as slack against
+    # OCR-estimated font size/wrap error -- left/right (10.8pt = 0.15in each)
+    # and top/bottom (3.6pt = 0.05in each) reproduce that same total slack,
+    # just split evenly across both sides instead of dumped entirely on the
+    # right/bottom edge, which visibly shifted every box off its true
+    # detected position. Override lower for source PDFs with tightly-set text
+    # boxes, or per-box in the web editor (TextStylePanel) for a closer match
+    # on a specific line.
+    text_inset_pt: tuple = (3.6, 10.8, 3.6, 10.8)
 
     # Flat padding for extra_boxes (e.g. a fixed watermark region) before
     # inpainting -- these aren't text-detector output, unlike the OCR boxes

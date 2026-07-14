@@ -11,7 +11,7 @@
       class="rotate-wrapper"
       :style="{ transform: `rotate(${elementInfo.rotate}deg)` }"
     >
-      <div 
+      <div
         class="element-content"
         :style="{
           backgroundColor: elementInfo.fill,
@@ -21,6 +21,7 @@
           letterSpacing: (elementInfo.wordSpace || 0) + 'px',
           color: elementInfo.defaultColor,
           fontFamily: elementInfo.defaultFontName,
+          padding: `${inset[0]}px ${inset[1]}px ${inset[2]}px ${inset[3]}px`,
         }"
       >
         <ElementOutline
@@ -55,9 +56,11 @@ export default defineComponent({
   setup(props) {
     const shadow = computed(() => props.elementInfo.shadow)
     const { shadowStyle } = useElementShadow(shadow)
+    const inset = computed(() => props.elementInfo.inset || [10, 10, 10, 10])
 
     return {
       shadowStyle,
+      inset,
     }
   },
 })
@@ -73,7 +76,6 @@ export default defineComponent({
 }
 .element-content {
   position: relative;
-  padding: 10px;
   line-height: 1.5;
   word-break: break-word;
 

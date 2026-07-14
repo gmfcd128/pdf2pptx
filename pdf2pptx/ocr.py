@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from paddleocr import PaddleOCR
 
-from .text_utils import looks_like_garbage, resolve_font
+from .text_utils import estimate_font_size_pt, looks_like_garbage, resolve_font
 
 
 def sample_text_color(img_rgb, bbox):
@@ -149,6 +149,7 @@ class OcrEngine:
             if not text or conf < config.ocr_min_conf or looks_like_garbage(text, config.junk_chars):
                 continue
             x0, y0, x1, y1 = bbox
+            w_px = x1 - x0
             h_px = y1 - y0
 
             # render_geom/rotation_deg describe the text's own tilted quad, used
@@ -160,10 +161,13 @@ class OcrEngine:
             rotation_deg = 0.0
             render_geom = None
             if poly is not None:
-                cx, cy, w_px, rot_h_px, rotation_deg = quad_geometry(poly, config.ocr_min_rotation_deg)
+                cx, cy, quad_w_px, quad_h_px, rotation_deg = quad_geometry(poly, config.ocr_min_rotation_deg)
                 if rotation_deg != 0.0:
-                    render_geom = (cx, cy, w_px, rot_h_px)
-                    h_px = rot_h_px  # font size should track the text's own height, not the larger axis-aligned box
+                    render_geom = (cx, cy, quad_w_px, quad_h_px)
+                    # font size should track the text's own tilted quad, not
+                    # the larger axis-aligned box -- same reasoning applies to
+                    # width as already applied to height above.
+                    w_px, h_px = quad_w_px, quad_h_px
 
             results.append({
                 "text": text,
@@ -171,7 +175,7 @@ class OcrEngine:
                 "rotation_deg": rotation_deg,
                 "render_geom": render_geom,
                 "color": sample_text_color(img_rgb, bbox),
-                "font_size_pt": max(6.0, h_px * (config.slide_h_in / H) * 72 * 0.8),
+                "font_size_pt": estimate_font_size_pt(text, w_px, h_px, W, H, config),
                 "font_name": resolve_font(None, text),
             })
         return results, mask_boxes
