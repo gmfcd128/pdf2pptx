@@ -34,7 +34,7 @@ public sealed record SlideDto(
     string OriginalImage,
     JsonElement Elements);
 
-public sealed record SlidesResponse(double ViewportRatio, List<SlideDto> Slides);
+public sealed record SlidesResponse(double ViewportRatio, double CanvasWidthIn, List<SlideDto> Slides);
 
 /// <summary>Shared body shape for both the inpaint and restore-region actions
 /// -- each always operates on a fixed, distinct source (current background for

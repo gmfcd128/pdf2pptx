@@ -16,6 +16,10 @@ export interface ApiSlide {
 
 export interface SlidesResponse {
   viewportRatio: number
+  // How many real inches PPTist's fixed 1000-unit-wide canvas represents for
+  // this job -- see service/main.py. Needed by useExport.ts to convert
+  // element positions back into real inches; not always 10.
+  canvasWidthIn: number
   slides: ApiSlide[]
 }
 

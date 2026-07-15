@@ -26,6 +26,12 @@ export interface SlidesState {
   slides: Slide[];
   slideIndex: number;
   viewportRatio: number;
+  // How many real inches the canvas's fixed 1000-unit width represents --
+  // stock PPTist content is always implicitly 10 (its own PPTX export,
+  // useExport.ts, assumes this unless told otherwise), but a pdf2pptx-
+  // converted job can declare a different value (see api/slides.ts's
+  // canvasWidthIn) that useExport.ts must convert positions against instead.
+  viewportWidthIn: number;
 }
 
 export const useSlidesStore = defineStore('slides', {
@@ -34,6 +40,7 @@ export const useSlidesStore = defineStore('slides', {
     slides: slides, // 幻灯片页面数据
     slideIndex: 0, // 当前页面索引
     viewportRatio: 0.5625, // 可是区域比例，默认16:9
+    viewportWidthIn: 10, // 画布宽度（英吋），预设为10（PPTist 原生比例）
   }),
 
   getters: {
@@ -111,7 +118,11 @@ export const useSlidesStore = defineStore('slides', {
     setViewportRatio(viewportRatio: number) {
       this.viewportRatio = viewportRatio
     },
-  
+
+    setViewportWidthIn(viewportWidthIn: number) {
+      this.viewportWidthIn = viewportWidthIn
+    },
+
     setSlides(slides: Slide[]) {
       this.slides = slides
     },

@@ -60,7 +60,7 @@ export default defineComponent({
       loadingEditor.value = true
       loadError.value = null
       try {
-        const { viewportRatio, slides } = await getSlides(jobId.value)
+        const { viewportRatio, canvasWidthIn, slides } = await getSlides(jobId.value)
 
         const pages: Record<string, PageMeta> = {}
         const editorSlides: Slide[] = slides.map(s => {
@@ -82,6 +82,7 @@ export default defineComponent({
 
         slidesStore.setSlides(editorSlides)
         slidesStore.setViewportRatio(viewportRatio)
+        slidesStore.setViewportWidthIn(canvasWidthIn)
         slidesStore.updateSlideIndex(0)
         pdf2pptxStore.startEditing(jobId.value, pages)
       }

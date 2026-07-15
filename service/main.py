@@ -217,7 +217,19 @@ async def get_job_slides(job_id: str):
         slide["original_path"] = f"pages/{idx}/original.png"
         slides.append(slide)
 
-    return {"viewport_ratio": 0.5625, "slides": slides}
+    # Both derived from the same PipelineConfig the slides themselves were
+    # built with (see pptist.py's units_per_inch), not hardcoded -- the web
+    # editor's client-side PPTX export (useExport.ts) needs canvas_width_in
+    # to convert PPTist's fixed 1000-unit-wide canvas back into the same
+    # real inches pptist.py used to place these elements; a mismatched
+    # constant here is what silently made every exported box too narrow for
+    # its own text.
+    config = converter.config
+    return {
+        "viewport_ratio": config.slide_h_in / config.slide_w_in,
+        "canvas_width_in": config.slide_w_in,
+        "slides": slides,
+    }
 
 
 @app.get("/jobs/{job_id}/pages/{page_index}/background.png")

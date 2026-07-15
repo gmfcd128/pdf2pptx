@@ -98,7 +98,7 @@ public sealed class ConversionsController(IPdfConversionClient conversionClient)
             $"/api/conversions/{jobId}/pages/{s.PageIndex}/original.png",
             s.Elements)).ToList();
 
-        return Ok(new SlidesResponse(upstream.ViewportRatio, slides));
+        return Ok(new SlidesResponse(upstream.ViewportRatio, upstream.CanvasWidthIn, slides));
     }
 
     [HttpGet("{jobId}/pages/{pageIndex}/background.png")]

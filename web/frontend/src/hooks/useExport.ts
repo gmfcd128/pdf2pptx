@@ -20,7 +20,7 @@ interface ExportImageConfig {
 }
 
 export default () => {
-  const { slides, theme, viewportRatio } = storeToRefs(useSlidesStore())
+  const { slides, theme, viewportRatio, viewportWidthIn } = storeToRefs(useSlidesStore())
 
   const exporting = ref(false)
 
@@ -71,7 +71,12 @@ export default () => {
 
   // 将HTML字符串格式化为pptxgenjs所需的格式
   // 核心思路：将HTML字符串按样式分片平铺，每个片段需要继承祖先元素的样式信息，遇到块级元素需要换行
-  const formatHTML = (html: string) => {
+  // unitsPerInch converts the content's inline CSS-px font-size back to real
+  // pt -- see exportPPTX's own unitsPerInch for why this isn't a hardcoded
+  // 0.75 (that assumes the canvas is always 96 units/inch, which is only
+  // true for stock PPTist's fixed 10in-wide canvas at ~4% error; a
+  // pdf2pptx job's wider canvas made that error large enough to matter).
+  const formatHTML = (html: string, unitsPerInch: number) => {
     const ast = toAST(html)
     let bulletFlag = false
 
@@ -134,7 +139,11 @@ export default () => {
           const options: pptxgen.TextPropsOptions = {}
 
           if (styleObj['font-size']) {
-            options.fontSize = parseInt(styleObj['font-size']) * 0.75
+            // parseFloat, not parseInt -- pdf2pptx's generated content sets
+            // sub-pixel font sizes (e.g. "37.85px"), and parseInt truncates
+            // at the decimal point instead of rounding, silently shrinking
+            // every exported run by up to ~1px (~0.75pt) for no reason.
+            options.fontSize = parseFloat(styleObj['font-size']) / unitsPerInch * 72
           }
           if (styleObj['color']) {
             options.color = formatColor(styleObj['color']).color
@@ -203,47 +212,49 @@ export default () => {
   >
 
   // 将SVG路径信息格式化为pptxgenjs所需要的格式
-  const formatPoints = (points: SvgPoints, scale = { x: 1, y: 1 }): Points => {
+  // unitsPerInch converts canvas units to real inches -- see exportPPTX's own
+  // unitsPerInch for why this isn't a hardcoded 100.
+  const formatPoints = (points: SvgPoints, unitsPerInch: number, scale = { x: 1, y: 1 }): Points => {
     return points.map(point => {
       if (point.close !== undefined) {
         return { close: true }
       }
       else if (point.type === 'M') {
         return {
-          x: point.x / 100 * scale.x,
-          y: point.y / 100 * scale.y,
+          x: point.x / unitsPerInch * scale.x,
+          y: point.y / unitsPerInch * scale.y,
           moveTo: true,
         }
       }
       else if (point.curve) {
         if (point.curve.type === 'cubic') {
           return {
-            x: point.x / 100 * scale.x,
-            y: point.y / 100 * scale.y,
+            x: point.x / unitsPerInch * scale.x,
+            y: point.y / unitsPerInch * scale.y,
             curve: {
               type: 'cubic',
-              x1: (point.curve.x1 as number) / 100 * scale.x,
-              y1: (point.curve.y1 as number) / 100 * scale.y,
-              x2: (point.curve.x2 as number) / 100 * scale.x,
-              y2: (point.curve.y2 as number) / 100 * scale.y,
+              x1: (point.curve.x1 as number) / unitsPerInch * scale.x,
+              y1: (point.curve.y1 as number) / unitsPerInch * scale.y,
+              x2: (point.curve.x2 as number) / unitsPerInch * scale.x,
+              y2: (point.curve.y2 as number) / unitsPerInch * scale.y,
             },
           }
         }
         else if (point.curve.type === 'quadratic') {
           return {
-            x: point.x / 100 * scale.x,
-            y: point.y / 100 * scale.y,
+            x: point.x / unitsPerInch * scale.x,
+            y: point.y / unitsPerInch * scale.y,
             curve: {
               type: 'quadratic',
-              x1: (point.curve.x1 as number) / 100 * scale.x,
-              y1: (point.curve.y1 as number) / 100 * scale.y,
+              x1: (point.curve.x1 as number) / unitsPerInch * scale.x,
+              y1: (point.curve.y1 as number) / unitsPerInch * scale.y,
             },
           }
         }
       }
       return {
-        x: point.x / 100 * scale.x,
-        y: point.y / 100 * scale.y,
+        x: point.x / unitsPerInch * scale.x,
+        y: point.y / unitsPerInch * scale.y,
       }
     })
   }
@@ -335,9 +346,19 @@ export default () => {
     exporting.value = true
     const pptx = new pptxgen()
 
-    if (viewportRatio.value === 0.625) pptx.layout = 'LAYOUT_16x10'
-    else if (viewportRatio.value === 0.75) pptx.layout = 'LAYOUT_4x3'
-    else pptx.layout = 'LAYOUT_16x9'
+    // Canvas units -> real inches. Stock PPTist content always implicitly
+    // means "canvas represents a 10in-wide slide" (viewportWidthIn defaults
+    // to 10 -- see store/slides.ts), matching the fixed-preset layouts below
+    // exactly; a pdf2pptx-converted job overrides viewportWidthIn to
+    // whatever PipelineConfig.slide_w_in actually was (see
+    // service/pptist.py's own units_per_inch, which every element position
+    // in this job's JSON was already generated against). Using a custom
+    // layout sized to the same value, instead of picking from pptxgenjs's
+    // fixed 10in-wide presets, keeps the declared slide bounds and the
+    // recovered element positions in agreement for either case.
+    const unitsPerInch = 1000 / viewportWidthIn.value
+    pptx.defineLayout({ name: 'PDF2PPTX_LAYOUT', width: viewportWidthIn.value, height: viewportWidthIn.value * viewportRatio.value })
+    pptx.layout = 'PDF2PPTX_LAYOUT'
 
     if (masterOverwrite) {
       const { color: bgColor, alpha: bgAlpha } = formatColor(theme.value.backgroundColor)
@@ -381,15 +402,15 @@ export default () => {
 
       for (const el of slide.elements) {
         if (el.type === 'text') {
-          const textProps = formatHTML(el.content)
+          const textProps = formatHTML(el.content, unitsPerInch)
 
           const inset = el.inset || [10, 10, 10, 10]
 
           const options: pptxgen.TextPropsOptions = {
-            x: el.left / 100,
-            y: el.top / 100,
-            w: el.width / 100,
-            h: el.height / 100,
+            x: el.left / unitsPerInch,
+            y: el.top / unitsPerInch,
+            w: el.width / unitsPerInch,
+            h: el.height / unitsPerInch,
             fontSize: 20 * 0.75,
             fontFace: '微软雅黑',
             color: '#000000',
@@ -397,7 +418,7 @@ export default () => {
             // pptxgenjs margin array order is [left, right, bottom, top];
             // inset is [top, right, bottom, left] (same as PPTist's own
             // TextInset -- see types/slides.ts and TextStylePanel.vue).
-            margin: [inset[3], inset[1], inset[2], inset[0]].map((v: number) => v * 0.75) as [number, number, number, number],
+            margin: [inset[3], inset[1], inset[2], inset[0]].map((v: number) => v / unitsPerInch * 72) as [number, number, number, number],
             paraSpaceBefore: 5 * 0.75,
             lineSpacingMultiple: 1.5 / 1.25,
             autoFit: true,
@@ -422,10 +443,10 @@ export default () => {
         else if (el.type === 'image') {
           const options: pptxgen.ImageProps = {
             path: el.src,
-            x: el.left / 100,
-            y: el.top / 100,
-            w: el.width / 100,
-            h: el.height / 100,
+            x: el.left / unitsPerInch,
+            y: el.top / unitsPerInch,
+            w: el.width / unitsPerInch,
+            h: el.height / unitsPerInch,
           }
           if (el.flipH) options.flipH = el.flipH
           if (el.flipV) options.flipV = el.flipV
@@ -442,18 +463,24 @@ export default () => {
             const [startX, startY] = start
             const [endX, endY] = end
 
+            // startX/startY/endX/endY are percentage coordinates (0-100,
+            // see types/slides.ts's ImageClipDataRange) -- unrelated to the
+            // canvas-units-to-inches conversion below, so these /100s stay
+            // fixed. originW/originH are canvas units, like el.width/
+            // el.height, so their own conversion to inches uses
+            // unitsPerInch same as everywhere else.
             const originW = el.width / ((endX - startX) / 100)
             const originH = el.height / ((endY - startY) / 100)
 
-            options.w = originW / 100
-            options.h = originH / 100
+            options.w = originW / unitsPerInch
+            options.h = originH / unitsPerInch
 
             options.sizing = {
               type: 'crop',
-              x: startX / 100 * originW / 100,
-              y: startY / 100 * originH / 100,
-              w: (endX - startX) / 100 * originW / 100,
-              h: (endY - startY) / 100 * originH / 100,
+              x: startX / 100 * originW / unitsPerInch,
+              y: startY / 100 * originH / unitsPerInch,
+              w: (endX - startX) / 100 * originW / unitsPerInch,
+              h: (endY - startY) / 100 * originH / unitsPerInch,
             }
           }
 
@@ -467,10 +494,10 @@ export default () => {
 
             const options: pptxgen.ImageProps = {
               data: base64SVG,
-              x: el.left / 100,
-              y: el.top / 100,
-              w: el.width / 100,
-              h: el.height / 100,
+              x: el.left / unitsPerInch,
+              y: el.top / unitsPerInch,
+              w: el.width / unitsPerInch,
+              h: el.height / unitsPerInch,
             }
             if (el.rotate) options.rotate = el.rotate
             if (el.link) {
@@ -485,16 +512,16 @@ export default () => {
               x: el.width / el.viewBox[0],
               y: el.height / el.viewBox[1],
             }
-            const points = formatPoints(toPoints(el.path), scale)
+            const points = formatPoints(toPoints(el.path), unitsPerInch, scale)
   
             const fillColor = formatColor(el.fill)
             const opacity = el.opacity === undefined ? 1 : el.opacity
   
             const options: pptxgen.ShapeProps = {
-              x: el.left / 100,
-              y: el.top / 100,
-              w: el.width / 100,
-              h: el.height / 100,
+              x: el.left / unitsPerInch,
+              y: el.top / unitsPerInch,
+              w: el.width / unitsPerInch,
+              h: el.height / unitsPerInch,
               fill: { color: fillColor.color, transparency: (1 - fillColor.alpha * opacity) * 100 },
               points,
             }
@@ -510,13 +537,13 @@ export default () => {
             pptxSlide.addShape('custGeom' as pptxgen.ShapeType, options)
           }
           if (el.text) {
-            const textProps = formatHTML(el.text.content)
+            const textProps = formatHTML(el.text.content, unitsPerInch)
 
             const options: pptxgen.TextPropsOptions = {
-              x: el.left / 100,
-              y: el.top / 100,
-              w: el.width / 100,
-              h: el.height / 100,
+              x: el.left / unitsPerInch,
+              y: el.top / unitsPerInch,
+              w: el.width / unitsPerInch,
+              h: el.height / unitsPerInch,
               fontSize: 20 * 0.75,
               fontFace: '微软雅黑',
               color: '#000000',
@@ -533,15 +560,15 @@ export default () => {
 
         else if (el.type === 'line') {
           const path = getLineElementPath(el)
-          const points = formatPoints(toPoints(path))
+          const points = formatPoints(toPoints(path), unitsPerInch)
           const { minX, maxX, minY, maxY } = getElementRange(el)
           const c = formatColor(el.color)
 
           const options: pptxgen.ShapeProps = {
-            x: el.left / 100,
-            y: el.top / 100,
-            w: (maxX - minX) / 100,
-            h: (maxY - minY) / 100,
+            x: el.left / unitsPerInch,
+            y: el.top / unitsPerInch,
+            w: (maxX - minX) / unitsPerInch,
+            h: (maxY - minY) / unitsPerInch,
             line: {
               color: c.color, 
               transparency: (1 - c.alpha) * 100,
@@ -578,10 +605,10 @@ export default () => {
           }
           
           const options: pptxgen.IChartOpts = {
-            x: el.left / 100,
-            y: el.top / 100,
-            w: el.width / 100,
-            h: el.height / 100,
+            x: el.left / unitsPerInch,
+            y: el.top / unitsPerInch,
+            w: el.width / unitsPerInch,
+            h: el.height / unitsPerInch,
             chartColors: el.chartType === 'pie' ? chartColors : chartColors.slice(0, el.data.series.length),
           }
 
@@ -692,11 +719,11 @@ export default () => {
           }
 
           const options: pptxgen.TableProps = {
-            x: el.left / 100,
-            y: el.top / 100,
-            w: el.width / 100,
-            h: el.height / 100,
-            colW: el.colWidths.map(item => el.width * item / 100),
+            x: el.left / unitsPerInch,
+            y: el.top / unitsPerInch,
+            w: el.width / unitsPerInch,
+            h: el.height / unitsPerInch,
+            colW: el.colWidths.map(item => el.width / unitsPerInch * item / 100),
           }
           if (el.theme) options.fill = { color: '#ffffff' }
           if (el.outline.width && el.outline.color) {
@@ -716,10 +743,10 @@ export default () => {
 
           const options: pptxgen.ImageProps = {
             data: base64SVG,
-            x: el.left / 100,
-            y: el.top / 100,
-            w: el.width / 100,
-            h: el.height / 100,
+            x: el.left / unitsPerInch,
+            y: el.top / unitsPerInch,
+            w: el.width / unitsPerInch,
+            h: el.height / unitsPerInch,
           }
           if (el.link) {
             const linkOption = getLinkOption(el.link)

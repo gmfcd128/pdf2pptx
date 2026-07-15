@@ -11,8 +11,22 @@ class PipelineConfig:
     Chinese for OCR).
     """
 
-    slide_w_in: float = 10.0
-    slide_h_in: float = 5.625
+    # Modern PowerPoint/Keynote/Google Slides' actual default Widescreen size
+    # (960x540pt, i.e. 12192000x6858000 EMU) -- not just an arbitrary choice:
+    # every geometry/font-size number this pipeline computes is a fraction of
+    # these two values, so they set the absolute scale of every number a user
+    # sees while editing the result. The previous 10x5.625in (PowerPoint
+    # 2007-2010's older "On-screen Show 16:9" size) produces the exact same
+    # visual result -- PowerPoint always scales a slide to fill the display
+    # regardless of its declared size in inches -- but at 4/3 smaller absolute
+    # point values throughout, which pushed this document family's smaller
+    # labels below 8pt (PowerPoint's own font-size dropdown doesn't even list
+    # presets that small) and made every size feel unusually fussy to
+    # hand-tune. text_inset_pt below is pre-scaled to match; the two 0.2in/
+    # 0.15in tight-box floors in slide_builder.add_text_box and
+    # service/pptist.py's mirrored geometry are scaled by the same 4/3 ratio.
+    slide_w_in: float = 13 + 1 / 3
+    slide_h_in: float = 7.5
 
     # Render zoom relative to the PDF's native point size. 1.5x matches this
     # family of documents' native embedded-image detail (see CLAUDE.md); bump
@@ -58,17 +72,22 @@ class PipelineConfig:
     # text-frame margin (tf.margin_*) so PowerPoint actually insets the text
     # back in by the same amount -- net effect, the glyphs render exactly
     # where they were detected in the source PDF, with this inset as pure
-    # breathing room around them rather than a positional offset. Defaults
-    # preserve this document family's previously tuned look, where a flat
+    # breathing room around them rather than a positional offset.
+    #
+    # left/right used to be 3x top/bottom (14.4pt vs 4.8pt): originally a flat
     # 0.3in/0.1in was added to a box's raw width/height as slack against
-    # OCR-estimated font size/wrap error -- left/right (10.8pt = 0.15in each)
-    # and top/bottom (3.6pt = 0.05in each) reproduce that same total slack,
-    # just split evenly across both sides instead of dumped entirely on the
-    # right/bottom edge, which visibly shifted every box off its true
-    # detected position. Override lower for source PDFs with tightly-set text
-    # boxes, or per-box in the web editor (TextStylePanel) for a closer match
-    # on a specific line.
-    text_inset_pt: tuple = (3.6, 10.8, 3.6, 10.8)
+    # OCR-estimated font size/wrap error, before text_utils.estimate_font_size_pt
+    # grew its own width-vs-height cap for that -- once that cap was doing the
+    # actual overflow prevention, the old left/right slack was just excess
+    # padding with nothing left to guard against. It was small enough not to
+    # matter on body text/titles, but on a short, tightly-drawn UI badge (e.g.
+    # a "[製造業]" category tag, whose own background pill has barely any
+    # padding around the text in the source image) it inflated the box to
+    # nearly double the pill's actual width. left/right now matches top/bottom
+    # -- override higher per-document if a source PDF's text boxes need more
+    # horizontal breathing room, or per-box in the web editor (TextStylePanel)
+    # for a specific line.
+    text_inset_pt: tuple = (4.8, 4.8, 4.8, 4.8)
 
     # Flat padding for extra_boxes (e.g. a fixed watermark region) before
     # inpainting -- these aren't text-detector output, unlike the OCR boxes

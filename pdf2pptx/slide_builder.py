@@ -2,6 +2,14 @@ from pptx.enum.text import MSO_ANCHOR
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 
+# Degenerate-detection floors for a text line's own tight width/height,
+# before inset is added -- e.g. a single punctuation mark or a detection
+# jitter artifact -- not a meaningful visual minimum otherwise. Scaled by the
+# same 4/3 ratio as PipelineConfig.slide_w_in/slide_h_in's own default
+# (originally 0.2in/0.15in, tuned against the older 10x5.625in slide size).
+MIN_TIGHT_W_IN = 0.2 * 4 / 3
+MIN_TIGHT_H_IN = 0.15 * 4 / 3
+
 
 def add_text_box(slide, t, W, H, config):
     rotation_deg = t.get("rotation_deg", 0.0)
@@ -22,8 +30,8 @@ def add_text_box(slide, t, W, H, config):
         # placed/sized here as if unrotated (centered on the quad's center)
         # and rotation is applied last.
         cx, cy, w_px, h_px = render_geom
-        w_in = max(0.2, w_px / W * config.slide_w_in) + inset_left_in + inset_right_in
-        h_in = max(0.15, h_px / H * config.slide_h_in) + inset_top_in + inset_bottom_in
+        w_in = max(MIN_TIGHT_W_IN, w_px / W * config.slide_w_in) + inset_left_in + inset_right_in
+        h_in = max(MIN_TIGHT_H_IN, h_px / H * config.slide_h_in) + inset_top_in + inset_bottom_in
         x_in = cx / W * config.slide_w_in - w_in / 2
         y_in = cy / H * config.slide_h_in - h_in / 2
     else:
@@ -32,8 +40,8 @@ def add_text_box(slide, t, W, H, config):
         tight_h_in = (y1 - y0) / H * config.slide_h_in
         x_in = x0 / W * config.slide_w_in - inset_left_in
         y_in = y0 / H * config.slide_h_in - inset_top_in
-        w_in = max(0.2, tight_w_in) + inset_left_in + inset_right_in
-        h_in = max(0.15, tight_h_in) + inset_top_in + inset_bottom_in
+        w_in = max(MIN_TIGHT_W_IN, tight_w_in) + inset_left_in + inset_right_in
+        h_in = max(MIN_TIGHT_H_IN, tight_h_in) + inset_top_in + inset_bottom_in
 
     box = slide.shapes.add_textbox(Inches(x_in), Inches(y_in), Inches(w_in), Inches(h_in))
     if rotation_deg:

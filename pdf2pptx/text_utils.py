@@ -3,10 +3,18 @@ def has_cjk(s):
 
 
 # Standard full-width/half-width approximation for CJK UI fonts: a CJK
-# character is roughly as wide as it is tall (~1em advance), other characters
-# (Latin letters, digits, punctuation) roughly half that.
+# character is roughly as wide as it is tall (~1em advance). Other characters
+# (Latin letters, digits, punctuation) were originally modeled at 0.55em
+# ("roughly half" a CJK char), but measured against Arial/Microsoft
+# JhengHei's actual glyph metrics, all-caps runs -- common in this kind of
+# business-deck content as English acronyms/brand names (e.g. "APLUS MATRIX
+# INTERNATIONAL CORP.", "HOTEL", "WMS/TMS/LMS") -- render at ~0.6-0.67em/char,
+# well above 0.55. Since this estimate only ever needs to be a *safe* upper
+# bound (see estimate_font_size_pt), 0.6 trades a smaller font on ordinary
+# lowercase-heavy text for not underestimating the width of exactly the
+# strings most likely to actually overflow.
 _CJK_CHAR_EM = 1.0
-_OTHER_CHAR_EM = 0.55
+_OTHER_CHAR_EM = 0.6
 
 
 def estimate_line_em_width(text):
@@ -33,16 +41,51 @@ def estimate_font_size_pt(text, w_px, h_px, img_w_px, img_h_px, config):
     visually different from the source PDF than word-wrapping into an extra
     line that doesn't exist there.
     """
-    height_pt = max(6.0, h_px * (config.slide_h_in / img_h_px) * 72 * 0.8)
+    # 0.8 -> 0.88: measured directly against APM_公司簡介_AI_Evolution.pdf --
+    # rendered each detected line's own glyph ink height at the pipeline's
+    # zoom, compared it against the same font (Microsoft JhengHei) rendered
+    # at known point sizes to back out the line's true source font size, then
+    # rescaled by config.slide_h_in against that source page's own physical
+    # height (the two aren't the same slide size -- this pipeline's default
+    # output slide is smaller). That true size consistently came out ~10-30%
+    # above what ratio 0.8 produced (e.g. a body paragraph: true ~16.7pt vs.
+    # 0.8's 12.75pt) -- 0.8 was leaving more headroom than the box height
+    # actually needed, which is what made the layout feel sparse. 0.88 still
+    # keeps a margin below 1:1 rather than chasing the exact measured value,
+    # since the measurement is itself an approximation (single-document
+    # sample, assumed font, assumed OCR-box-to-ink-height margin).
+    height_pt = max(6.0, h_px * (config.slide_h_in / img_h_px) * 72 * 0.88)
     em_width = estimate_line_em_width(text)
     if em_width <= 0:
         return height_pt
     avail_w_pt = (w_px / img_w_px) * config.slide_w_in * 72
-    # Target a bit under the full available width, not the exact boundary --
+    # Target well under the full available width, not the exact boundary --
     # this estimate is a rough approximation of real font metrics, not a
-    # measurement of them.
-    width_pt = (avail_w_pt / em_width) * 0.95
-    return max(6.0, min(height_pt, width_pt))
+    # measurement of them, and the font it's approximating (resolve_font's
+    # "Microsoft JhengHei"/"Arial") may not even be the one actually used to
+    # render the line: neither PowerPoint nor a browser has it installed on
+    # every machine, and whatever they substitute instead is reliably a bit
+    # wider per character, not narrower. 0.85 (now 0.92, see below) leaves
+    # slack against that substitution risk, instead of 0.95's ~5%, which was
+    # too thin to survive a substituted font in practice.
+    #
+    # 0.85 -> 0.92: same real-glyph-measurement check as height_pt above --
+    # the width-bound lines (most lines; see estimate_font_size_pt's own
+    # docstring) were coming out even further under their measured true size
+    # than the height-bound ones (e.g. this document's title: true ~37.7pt
+    # vs. 0.85's 27.84pt), so the width margin was the bigger contributor to
+    # the layout reading as too empty. Some of that gap is intentional
+    # substitution-risk slack this doesn't try to fully close; 0.92 narrows
+    # it without giving it up entirely.
+    width_pt = (avail_w_pt / em_width) * 0.92
+    # No outer max(6.0, ...) here (height_pt already floors itself above) --
+    # re-flooring the *combined* result would let a long line in a narrow
+    # detected box get bumped back up past width_pt, silently reintroducing
+    # the overflow/wrap this whole function exists to prevent (found via a
+    # real-font-metrics check against pptist.pptx: a long all-caps English
+    # subtitle was capped to exactly 6.0pt by this floor even though its own
+    # width math wanted ~4.7pt, and it wrapped to a second line on export).
+    return min(height_pt, width_pt)
 
 
 def resolve_font(font_name, text):

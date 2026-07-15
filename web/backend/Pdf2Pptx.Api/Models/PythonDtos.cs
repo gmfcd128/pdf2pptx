@@ -70,6 +70,13 @@ public sealed class PythonSlidesResponse
     [JsonPropertyName("viewport_ratio")]
     public required double ViewportRatio { get; init; }
 
+    /// <summary>How many real inches PPTist's fixed 1000-unit-wide canvas
+    /// represents for this job (see service/main.py) -- the frontend's
+    /// client-side PPTX export needs this to convert element positions back
+    /// into real inches; it is not always 10.</summary>
+    [JsonPropertyName("canvas_width_in")]
+    public required double CanvasWidthIn { get; init; }
+
     [JsonPropertyName("slides")]
     public required List<PythonSlideDto> Slides { get; init; }
 }
