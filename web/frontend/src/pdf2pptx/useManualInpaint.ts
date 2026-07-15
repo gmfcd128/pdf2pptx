@@ -5,10 +5,12 @@ import useHistorySnapshot from '@/hooks/useHistorySnapshot'
 import { usePdf2pptxStore } from './store'
 import { inpaintRegion, restoreRegion } from './api/slides'
 
-// PPTist's viewport is always VIEWPORT_SIZE (1000) units wide; pdf2pptx loads
-// its converted slides at a fixed 16:9 ratio (see UploadStage.vue), so the
-// viewport height in the same units is always VIEWPORT_SIZE * this ratio.
-const VIEWPORT_HEIGHT_RATIO = 0.5625
+// PPTist's viewport is always VIEWPORT_SIZE (1000) units wide; pdf2pptx pages
+// load at a fixed 16:9 ratio (see UploadStage.vue) and SlideDesignPanel.vue
+// hides the canvas-size control for pdf2pptx decks so it stays that way, but
+// this reads the live store value rather than hardcoding 0.5625 so the click
+// math can't silently drift out of sync with whatever ratio is actually in
+// effect (e.g. a deck edited before that control was locked down).
 
 // Which of the two background-repair actions the current area-select session
 // is for -- both share the same "click 4 points" draw step, only what
@@ -19,8 +21,9 @@ export interface ManualInpaintState {
   // Whether the "click 4 points" draw mode is active on the canvas.
   active: boolean
   mode: ManualInpaintMode | null
-  // Collected points, in viewport units (0..1000 x, 0..562.5 y) -- the same
-  // coordinate space as PPTElement left/top, not source-image pixels yet.
+  // Collected points, in viewport units (0..1000 x, 0..1000*viewportRatio y)
+  // -- the same coordinate space as PPTElement left/top, not source-image
+  // pixels yet.
   points: [number, number][]
   submitting: boolean
   error: string | null
@@ -82,9 +85,10 @@ export const useManualInpaintStore = defineStore('manualInpaint', {
       this.submitting = true
       this.error = null
       try {
+        const viewportHeight = VIEWPORT_SIZE * useSlidesStore().viewportRatio
         const sourcePoints: [number, number][] = this.points.map(([x, y]) => [
           (x / VIEWPORT_SIZE) * meta.sourceWidth,
-          (y / (VIEWPORT_SIZE * VIEWPORT_HEIGHT_RATIO)) * meta.sourceHeight,
+          (y / viewportHeight) * meta.sourceHeight,
         ])
         const result = this.mode === 'restore'
           ? await restoreRegion(jobId, meta.pageIndex, sourcePoints)

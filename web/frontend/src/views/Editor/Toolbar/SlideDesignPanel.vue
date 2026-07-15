@@ -1,59 +1,61 @@
 <template>
   <div class="slide-design-panel">
-    <div class="title">背景填充</div>
-    <div class="row">
-      <Select 
-        style="flex: 10;" 
-        :value="background.type" 
-        @change="value => updateBackgroundType(value)"
-      >
-        <SelectOption value="solid">纯色填充</SelectOption>
-        <SelectOption value="image">图片填充</SelectOption>
-        <SelectOption value="gradient">渐变填充</SelectOption>
-      </Select>
-      <div style="flex: 1;"></div>
+    <template v-if="!pdf2pptxPageMeta">
+      <div class="title">背景填充</div>
+      <div class="row">
+        <Select
+          style="flex: 10;"
+          :value="background.type"
+          @change="value => updateBackgroundType(value)"
+        >
+          <SelectOption value="solid">纯色填充</SelectOption>
+          <SelectOption value="image">图片填充</SelectOption>
+          <SelectOption value="gradient">渐变填充</SelectOption>
+        </Select>
+        <div style="flex: 1;"></div>
 
-      <Popover trigger="click" v-if="background.type === 'solid'">
-        <template #content>
-          <ColorPicker
-            :modelValue="background.color"
-            @update:modelValue="color => updateBackground({ color })"
-          />
-        </template>
-        <ColorButton :color="background.color || '#fff'" style="flex: 10;" />
-      </Popover>
+        <Popover trigger="click" v-if="background.type === 'solid'">
+          <template #content>
+            <ColorPicker
+              :modelValue="background.color"
+              @update:modelValue="color => updateBackground({ color })"
+            />
+          </template>
+          <ColorButton :color="background.color || '#fff'" style="flex: 10;" />
+        </Popover>
 
-      <Select 
-        style="flex: 10;" 
-        :value="background.imageSize || 'cover'" 
-        @change="value => updateBackground({ imageSize: value })"
-        v-else-if="background.type === 'image'"
-      >
-        <SelectOption value="contain">缩放</SelectOption>
-        <SelectOption value="repeat">拼贴</SelectOption>
-        <SelectOption value="cover">缩放铺满</SelectOption>
-      </Select>
+        <Select
+          style="flex: 10;"
+          :value="background.imageSize || 'cover'"
+          @change="value => updateBackground({ imageSize: value })"
+          v-else-if="background.type === 'image'"
+        >
+          <SelectOption value="contain">缩放</SelectOption>
+          <SelectOption value="repeat">拼贴</SelectOption>
+          <SelectOption value="cover">缩放铺满</SelectOption>
+        </Select>
 
-      <Select 
-        style="flex: 10;" 
-        :value="background.gradientType" 
-        @change="value => updateBackground({ gradientType: value })"
-        v-else
-      >
-        <SelectOption value="linear">线性渐变</SelectOption>
-        <SelectOption value="radial">径向渐变</SelectOption>
-      </Select>
-    </div>
+        <Select
+          style="flex: 10;"
+          :value="background.gradientType"
+          @change="value => updateBackground({ gradientType: value })"
+          v-else
+        >
+          <SelectOption value="linear">线性渐变</SelectOption>
+          <SelectOption value="radial">径向渐变</SelectOption>
+        </Select>
+      </div>
 
-    <div class="background-image-wrapper" v-if="background.type === 'image'">
-      <FileInput @change="files => uploadBackgroundImage(files)">
-        <div class="background-image">
-          <div class="content" :style="{ backgroundImage: `url(${background.image})` }">
-            <IconPlus />
+      <div class="background-image-wrapper" v-if="background.type === 'image'">
+        <FileInput @change="files => uploadBackgroundImage(files)">
+          <div class="background-image">
+            <div class="content" :style="{ backgroundImage: `url(${background.image})` }">
+              <IconPlus />
+            </div>
           </div>
-        </div>
-      </FileInput>
-    </div>
+        </FileInput>
+      </div>
+    </template>
 
     <template v-if="pdf2pptxPageMeta">
       <Divider />
@@ -79,56 +81,60 @@
       <p v-if="manualInpaint.error" class="pdf2pptx-error">{{ manualInpaint.error }}</p>
     </template>
 
-    <div class="background-gradient-wrapper" v-if="background.type === 'gradient'">
+    <template v-if="!pdf2pptxPageMeta">
+      <div class="background-gradient-wrapper" v-if="background.type === 'gradient'">
+        <div class="row">
+          <div style="flex: 2;">起点颜色：</div>
+          <Popover trigger="click">
+            <template #content>
+              <ColorPicker
+                :modelValue="background.gradientColor[0]"
+                @update:modelValue="value => updateBackground({ gradientColor: [value, background.gradientColor[1]] })"
+              />
+            </template>
+            <ColorButton :color="background.gradientColor[0]" style="flex: 3;" />
+          </Popover>
+        </div>
+        <div class="row">
+          <div style="flex: 2;">终点颜色：</div>
+          <Popover trigger="click">
+            <template #content>
+              <ColorPicker
+                :modelValue="background.gradientColor[1]"
+                @update:modelValue="value => updateBackground({ gradientColor: [background.gradientColor[0], value] })"
+              />
+            </template>
+            <ColorButton :color="background.gradientColor[1]" style="flex: 3;" />
+          </Popover>
+        </div>
+        <div class="row" v-if="background.gradientType === 'linear'">
+          <div style="flex: 2;">渐变角度：</div>
+          <Slider
+            class="slider"
+            :min="0"
+            :max="360"
+            :step="15"
+            :value="background.gradientRotate"
+            @change="value => updateBackground({ gradientRotate: value })"
+          />
+        </div>
+      </div>
+
+      <div class="row"><Button style="flex: 1;" @click="applyBackgroundAllSlide()">应用背景到全部</Button></div>
+    </template>
+
+    <template v-if="!isPdf2pptxDeck">
+      <Divider />
+
       <div class="row">
-        <div style="flex: 2;">起点颜色：</div>
-        <Popover trigger="click">
-          <template #content>
-            <ColorPicker
-              :modelValue="background.gradientColor[0]"
-              @update:modelValue="value => updateBackground({ gradientColor: [value, background.gradientColor[1]] })"
-            />
-          </template>
-          <ColorButton :color="background.gradientColor[0]" style="flex: 3;" />
-        </Popover>
+        <div style="flex: 2;">画布尺寸：</div>
+        <Select style="flex: 3;" :value="viewportRatio" @change="value => updateViewportRatio(value)">
+          <SelectOption :value="0.5625">宽屏 16 : 9</SelectOption>
+          <SelectOption :value="0.625">宽屏 16 ：10</SelectOption>
+          <SelectOption :value="0.75">标准 4 ：3</SelectOption>
+        </Select>
       </div>
-      <div class="row">
-        <div style="flex: 2;">终点颜色：</div>
-        <Popover trigger="click">
-          <template #content>
-            <ColorPicker
-              :modelValue="background.gradientColor[1]"
-              @update:modelValue="value => updateBackground({ gradientColor: [background.gradientColor[0], value] })"
-            />
-          </template>
-          <ColorButton :color="background.gradientColor[1]" style="flex: 3;" />
-        </Popover>
-      </div>
-      <div class="row" v-if="background.gradientType === 'linear'">
-        <div style="flex: 2;">渐变角度：</div>
-        <Slider
-          class="slider"
-          :min="0"
-          :max="360"
-          :step="15"
-          :value="background.gradientRotate"
-          @change="value => updateBackground({ gradientRotate: value })" 
-        />
-      </div>
-    </div>
-
-    <div class="row"><Button style="flex: 1;" @click="applyBackgroundAllSlide()">应用背景到全部</Button></div>
-
-    <Divider />
-
-    <div class="row">
-      <div style="flex: 2;">画布尺寸：</div>
-      <Select style="flex: 3;" :value="viewportRatio" @change="value => updateViewportRatio(value)">
-        <SelectOption :value="0.5625">宽屏 16 : 9</SelectOption>
-        <SelectOption :value="0.625">宽屏 16 ：10</SelectOption>
-        <SelectOption :value="0.75">标准 4 ：3</SelectOption>
-      </Select>
-    </div>
+    </template>
 
     <Divider />
 
@@ -248,6 +254,13 @@ export default defineComponent({
     // user added by hand in the editor has none, and gets no "PDF 背景修補"
     // section at all.
     const pdf2pptxPageMeta = computed(() => pdf2pptxStore.pages[currentSlide.value?.id] ?? null)
+
+    // viewportRatio is deck-wide, not per-slide, so this must gate on whether
+    // the deck came from a conversion at all, not just the current slide --
+    // changing it away from 16:9 stretches every pdf2pptx page's background
+    // out of its native aspect ratio, and useManualInpaint's click-to-pixel
+    // math assumes the fixed 16:9 ratio pdf2pptx pages always load at.
+    const isPdf2pptxDeck = computed(() => !!pdf2pptxStore.jobId)
 
     const background = computed(() => {
       if (!currentSlide.value.background) {
@@ -398,6 +411,7 @@ export default defineComponent({
       togglePresetThemesVisible,
       manualInpaint,
       pdf2pptxPageMeta,
+      isPdf2pptxDeck,
     }
   },
 })
